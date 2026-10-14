@@ -70,6 +70,7 @@ pnpm setup:codex-instructions
 ```
 
 This adds the recommended delegation guidance to your Codex instructions while preserving unrelated content.
+The guidance permits delegation only to an agent explicitly named by the user; otherwise, Codex performs the task itself.
 
 ## Usage
 

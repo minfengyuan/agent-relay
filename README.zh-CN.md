@@ -70,6 +70,7 @@ pnpm setup:codex-instructions
 ```
 
 该命令会把推荐的 Agent 委派说明加入 Codex 指令，同时保留其他已有内容。
+该规则仅允许委派给用户明确提及的 Agent；未指定 Agent 时，由 Codex 自行完成任务。
 
 ## 使用方式
 

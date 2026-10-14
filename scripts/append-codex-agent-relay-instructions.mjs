@@ -14,7 +14,9 @@ const INSTRUCTIONS = `<!-- CODEX-AGENT-RELAY_START -->
 
 Codex owns planning, delegation, review, and integration. External agents execute bounded tasks in the supplied workspace/worktree.
 
-- Use \`grok_delegate\` for self-contained implementation work or an explicit Grok delegation request.
+Delegate only to an agent the user explicitly mentions (Grok, Cursor, OpenCode, or DSH). If the user does not name an agent, Codex performs the task itself; do not infer delegation from task type or complexity.
+
+- Use \`grok_delegate\` for Grok implementation tasks.
 - Use \`cursor_delegate\` for Cursor implementation tasks or focused analysis in \`ask\` mode; an optional \`model\` selects the startup model.
 - Use \`opencode_delegate\` for OpenCode implementation work. Optional \`model\`, \`effort\`, and \`agent\` change the live session configuration; omitted fields keep OpenCode's restored or default state.
 - Use \`dsh_delegate\` for DSH implementation work. Optional \`model\` and \`reasoningEffort\` change the live session configuration; omitted fields keep DSH's restored or default state. Existing sessions resume only when DSH advertises resume; the relay does not load or recreate them.
