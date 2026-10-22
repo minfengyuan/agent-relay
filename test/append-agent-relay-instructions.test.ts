@@ -7,13 +7,14 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const script = fileURLToPath(new URL("../scripts/append-agent-relay-instructions.mjs", import.meta.url));
+const scriptUrl = new URL("../scripts/append-agent-relay-instructions.mjs", import.meta.url);
+const script = fileURLToPath(scriptUrl);
 const execFileAsync = promisify(execFile);
 vi.mock("node:os", async (importOriginal) => {
   const actual = await importOriginal<typeof NodeOs>();
   return { ...actual, homedir: vi.fn(actual.homedir) };
 });
-const { installInstructions } = await import(script) as {
+const { installInstructions } = await import(scriptUrl.href) as {
   installInstructions: (agentsDirectory?: string) => Promise<void>;
 };
 const startMarker = "<!-- AGENT-RELAY_START -->";
