@@ -73,7 +73,7 @@ export class AcpRunner<I extends DelegateInput, R extends RelayResult> {
 
   async delegate(input: I, signal?: AbortSignal, reportProgress?: ProgressReporter): Promise<R> {
     assertRunnerAccepting();
-    if (process.env.CODEX_AGENT_RELAY_DELEGATED === "1") {
+    if (process.env.AGENT_RELAY_DELEGATED === "1") {
       throw new RelayFailure("NESTED_DELEGATION", "Delegation is disabled inside a delegated worker process");
     }
     this.adapter.validateInput?.(input);
@@ -204,7 +204,7 @@ export class AcpRunner<I extends DelegateInput, R extends RelayResult> {
       const metadata = this.adapter.sessionMetadata(input, record);
       if (totalAbort.signal.aborted) abortFailure(totalAbort.signal);
       const invocation = this.adapter.command(input, record);
-      const childEnv = { ...process.env, CODEX_AGENT_RELAY_DELEGATED: "1" };
+      const childEnv = { ...process.env, AGENT_RELAY_DELEGATED: "1" };
       try { await lease.markSpawning(); } catch (error) {
         const failure = asLeaseFailure(error, "Cannot persist spawning workspace lease state");
         leaseErrors.push(failure);
@@ -264,7 +264,7 @@ export class AcpRunner<I extends DelegateInput, R extends RelayResult> {
         Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
       );
       let lastProgress = 0;
-      let app = acp.client({ name: "codex-agent-relay" })
+      let app = acp.client({ name: "agent-relay" })
         .onRequest(acp.methods.client.session.requestPermission, ({ params }) => {
           return this.adapter.handlePermission(params, {
             sessionId,
@@ -310,7 +310,7 @@ export class AcpRunner<I extends DelegateInput, R extends RelayResult> {
           const initialized = await withTimeout(ctx.request(acp.methods.agent.initialize, {
             protocolVersion: 1,
             clientCapabilities: this.adapter.capabilities,
-            clientInfo: { name: "codex-agent-relay", version: "0.1.0" },
+            clientInfo: { name: "agent-relay", version: "0.1.0" },
           }), this.config.phaseTimeoutMs, "INITIALIZE_TIMEOUT", `${this.adapter.displayName} initialize timed out`);
           if (initialized.protocolVersion !== 1) {
             throw new RelayFailure("PROTOCOL_MISMATCH", `${this.adapter.displayName} returned ACP protocol ${initialized.protocolVersion}`);

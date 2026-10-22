@@ -35,7 +35,7 @@ async function assertNoActiveLease(state: string, cwd: string): Promise<void> {
 
 describeReal("real DSH ACP smoke", () => {
   it("creates, resumes across processes, and edits a disposable workspace", async () => {
-    if (process.env.CODEX_AGENT_RELAY_DELEGATED === "1") {
+    if (process.env.AGENT_RELAY_DELEGATED === "1") {
       throw new Error("Real DSH smoke is unavailable inside a delegated worker (NESTED_DELEGATION); run it from the parent environment");
     }
     const loaded = loadConfig();
@@ -88,7 +88,7 @@ describeReal("real DSH ACP smoke", () => {
   }, TEST_TIMEOUT_MS);
 
   it("optionally resumes after setting DSH_TEST_MODEL and DSH_TEST_REASONING_EFFORT", async (context) => {
-    if (process.env.CODEX_AGENT_RELAY_DELEGATED === "1") {
+    if (process.env.AGENT_RELAY_DELEGATED === "1") {
       throw new Error("Real DSH smoke is unavailable inside a delegated worker (NESTED_DELEGATION); run it from the parent environment");
     }
     const model = process.env.DSH_TEST_MODEL?.trim();

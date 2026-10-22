@@ -42,8 +42,8 @@ const dirs: string[] = [];
 vi.setConfig({ testTimeout: 15_000 });
 
 beforeEach(() => {
-  if (process.env.CODEX_AGENT_RELAY_DELEGATED === "1") {
-    vi.stubEnv("CODEX_AGENT_RELAY_DELEGATED", "");
+  if (process.env.AGENT_RELAY_DELEGATED === "1") {
+    vi.stubEnv("AGENT_RELAY_DELEGATED", "");
   }
 });
 

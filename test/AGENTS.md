@@ -53,7 +53,7 @@ Use the narrowest test file that owns the behavior:
 - `dsh-runner.test.ts` — DSH adapter behavior.
 - `process-lifecycle.test.ts` — cancellation, timeouts, child/process cleanup, and shutdown-sensitive cases.
 - `server.test.ts` — MCP tool schemas/wiring and structured results/errors.
-- `append-codex-agent-relay-instructions.test.ts` — setup-script transformations.
+- `append-agent-relay-instructions.test.ts` — setup-script transformations.
 - `*-real-smoke.test.ts` — opt-in integration with real CLIs.
 
 When a change crosses boundaries, add assertions at each affected public boundary rather than putting every scenario into one large test.

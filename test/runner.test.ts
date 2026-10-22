@@ -40,7 +40,7 @@ describe("GrokRunner", () => {
     expect(events).toContain("auth:cached_token");
     expect(events).toContain("new:");
     expect(events).toContain("load:fake-session-1");
-    expect(events).toContain('"name":"codex-agent-relay"');
+    expect(events).toContain('"name":"agent-relay"');
     expect(events).toContain("delegated:1");
   });
 
@@ -65,9 +65,10 @@ describe("GrokRunner", () => {
     const state = await tempDir();
     const cwd = await tempDir();
     vi.stubEnv("GROK_RELAY_DELEGATED", "1");
+    vi.stubEnv("CODEX_AGENT_RELAY_DELEGATED", "1");
     await expect(new GrokRunner(config(state), new SessionStore(state)).delegate({ task: "one", cwd }))
       .resolves.toMatchObject({ sessionId: "fake-session-1" });
-    vi.stubEnv("CODEX_AGENT_RELAY_DELEGATED", "1");
+    vi.stubEnv("AGENT_RELAY_DELEGATED", "1");
     await expect(new GrokRunner(config(state), new SessionStore(state)).delegate({ task: "one", cwd }))
       .rejects.toMatchObject({ code: "NESTED_DELEGATION" });
   });

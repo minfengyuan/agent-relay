@@ -65,7 +65,7 @@ function cursorAdapter(config: RelayConfig): ProviderAdapter<CursorDelegateInput
     command(input, record) {
       const command = config.cursorCommand?.trim();
       if (!command) {
-        throw new RelayFailure("CURSOR_COMMAND_REQUIRED", "CODEX_AGENT_RELAY_CURSOR_COMMAND must name the Cursor CLI executable");
+        throw new RelayFailure("CURSOR_COMMAND_REQUIRED", "AGENT_RELAY_CURSOR_COMMAND must name the Cursor CLI executable");
       }
       const metadata = this.sessionMetadata(input, record);
       const args = [...(config.cursorCommandArgs ?? []), "--sandbox", "enabled"];

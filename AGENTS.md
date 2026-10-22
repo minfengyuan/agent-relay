@@ -4,7 +4,7 @@ This file is the default entry point for coding agents working in this repositor
 
 ## Project in one paragraph
 
-`codex-agent-relay` is a local Node.js/TypeScript MCP server that lets Codex delegate work to ACP-capable coding agents. `src/server.ts` exposes the MCP tools, `src/runner/acp-runner.ts` owns the provider-neutral ACP/process lifecycle, `src/adapters/` contains provider policy, and `src/store.ts` persists resumable session metadata and serializes access to a working directory.
+`agent-relay` is a local Node.js/TypeScript MCP server that lets any local stdio MCP client delegate work to ACP-capable coding agents. `src/server.ts` exposes the MCP tools, `src/runner/acp-runner.ts` owns the provider-neutral ACP/process lifecycle, `src/adapters/` contains provider policy, and `src/store.ts` persists resumable session metadata and serializes access to a working directory.
 
 ## Read next only when relevant
 
@@ -51,10 +51,10 @@ Real-agent smoke tests are opt-in because they require local CLIs/authentication
 
 ## Non-negotiable invariants
 
-1. **Delegation stays non-interactive.** A delegated worker must not depend on an interactive question/approval round-trip through Codex.
+1. **Delegation stays non-interactive.** A delegated worker must not depend on an interactive question/approval round-trip through the calling client.
 2. **One active task per resolved working directory.** Preserve the `cwd` lock so two agents cannot mutate the same workspace concurrently.
 3. **Sessions stay bound to their working directory.** Resuming a session from another `cwd` must fail rather than silently retarget it.
-4. **No nested relay delegation.** The delegated child environment marks itself with `CODEX_AGENT_RELAY_DELEGATED=1`; do not create recursive agent trees through this relay.
+4. **No nested relay delegation.** The delegated child environment marks itself with `AGENT_RELAY_DELEGATED=1`; do not create recursive agent trees through this relay.
 5. **Cancellation and timeout must clean up children.** Preserve process-group termination and global shutdown cleanup; never leave an ACP CLI running after the MCP task ends.
 6. **Outputs stay bounded.** Keep text/stderr/provider summaries within configured limits and accurately propagate truncation.
 7. **Provider policy belongs in adapters.** Keep the generic ACP lifecycle provider-neutral unless behavior is truly protocol-wide.

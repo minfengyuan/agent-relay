@@ -113,11 +113,11 @@ export function runCli(config: RelayConfig, dependencies: CliDependencies = {}):
   };
   const onSdkError = (error: Error): void => {
     if (shuttingDown) recordError("transport", error);
-    else writeOrdinaryError(`[codex-agent-relay] ${error.message}`);
+    else writeOrdinaryError(`[agent-relay] ${error.message}`);
   };
   const onStdoutError = (error: Error): void => {
     if (shuttingDown) recordError("transport", error);
-    else writeOrdinaryError(`[codex-agent-relay] ${error.message}`);
+    else writeOrdinaryError(`[agent-relay] ${error.message}`);
   };
   const onStderrError = (error: Error): void => {
     if (shuttingDown) recordError("runtime", error);
@@ -173,7 +173,7 @@ export function runCli(config: RelayConfig, dependencies: CliDependencies = {}):
       setTimer,
       clearTimer,
     );
-    const initialWrite = writeShutdownText(`[codex-agent-relay] received ${reason}; cleaning up\n`);
+    const initialWrite = writeShutdownText(`[agent-relay] received ${reason}; cleaning up\n`);
 
     void (async () => {
       const [cleanupError, closeError, logError] = await Promise.all([
@@ -271,7 +271,7 @@ function formatShutdownErrors(
   limitBytes: number,
 ): string {
   const included = errors.slice(0, SHUTDOWN_DIAGNOSTIC_LIMIT);
-  const header = `[codex-agent-relay] shutdown failed with ${totalCount} error${totalCount === 1 ? "" : "s"}: `;
+  const header = `[agent-relay] shutdown failed with ${totalCount} error${totalCount === 1 ? "" : "s"}: `;
   const rawDetails = included.map((error) => `${error.kind}: ${error.message}`).join("; ");
   const baseFooter = omitted > 0 ? `; diagnostics truncated; ${omitted} omitted` : "";
   const initialAvailable = Math.max(0, limitBytes - Buffer.byteLength(header) - Buffer.byteLength(baseFooter) - 1);

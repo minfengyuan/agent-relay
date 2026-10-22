@@ -209,7 +209,7 @@ function registerDelegateTool<I extends { cwd: string }, R extends RelayResult>(
 
 export function createRelayServer(config: RelayConfig): McpServer {
   const server = new McpServer(
-    { name: "codex-agent-relay", version: "0.1.0" },
+    { name: "agent-relay", version: "0.1.0" },
     { capabilities: { tools: {} } },
   );
   const runner = new GrokRunner(config, new SessionStore(config.stateDir));

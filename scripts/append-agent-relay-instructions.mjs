@@ -2,19 +2,22 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { env } from "node:process";
-import { log, warn } from "node:console";
+import { argv } from "node:process";
+import { pathToFileURL } from "node:url";
+import { log } from "node:console";
 
-const START_MARKER = "<!-- CODEX-AGENT-RELAY_START -->";
-const END_MARKER = "<!-- CODEX-AGENT-RELAY_END -->";
-const LEGACY_START_MARKER = "<!-- GROK-BUILD_START -->";
-const LEGACY_END_MARKER = "<!-- GROK-BUILD_END -->";
-const INSTRUCTIONS = `<!-- CODEX-AGENT-RELAY_START -->
+const START_MARKER = "<!-- AGENT-RELAY_START -->";
+const END_MARKER = "<!-- AGENT-RELAY_END -->";
+const LEGACY_MARKERS = [
+  ["<!-- CODEX-AGENT-RELAY_START -->", "<!-- CODEX-AGENT-RELAY_END -->"],
+  ["<!-- GROK-BUILD_START -->", "<!-- GROK-BUILD_END -->"],
+];
+const INSTRUCTIONS = `<!-- AGENT-RELAY_START -->
 ## External coding agents
 
-Codex owns planning, delegation, review, and integration. External agents execute bounded tasks in the supplied workspace/worktree.
+The calling agent owns planning, delegation, review, and integration. External agents execute bounded tasks in the supplied workspace/worktree.
 
-Delegate only to an agent the user explicitly mentions (Grok, Cursor, OpenCode, or DSH). If the user does not name an agent, Codex performs the task itself; do not infer delegation from task type or complexity.
+Delegate only to an agent the user explicitly mentions (Grok, Cursor, OpenCode, or DSH). If the user does not name an agent, the calling agent performs the task itself; do not infer delegation from task type or complexity.
 
 - Use \`grok_delegate\` for Grok implementation tasks.
 - Use \`cursor_delegate\` for Cursor implementation tasks or focused analysis in \`ask\` mode; an optional \`model\` selects the startup model.
@@ -32,7 +35,7 @@ When delegating:
 - OpenCode's child \`question: deny\` overlay can be overridden by agent-specific rules. The worker is noninteractive and will time out if it waits for a user; this is not hard isolation.
 - DSH permission requests are refused (\`reject_once\` when offered). On PERMISSION_REQUIRED, review the request and coordinate any policy change before resuming; do not retry to bypass the rejection. The relay refuses automatic approvals; it does not provide hard filesystem or network isolation. Saved DSH sessions and deployment configuration still apply.
 - Keep this relay out of downstream agents' MCP configuration to avoid recursive delegation.
-<!-- CODEX-AGENT-RELAY_END -->`;
+<!-- AGENT-RELAY_END -->`;
 
 function locateBlock(content, startMarker, endMarker) {
   const start = content.indexOf(startMarker);
@@ -54,14 +57,15 @@ function locateBlock(content, startMarker, endMarker) {
 }
 
 function applyInstructions(content) {
-  const current = locateBlock(content, START_MARKER, END_MARKER);
-  const legacy = locateBlock(content, LEGACY_START_MARKER, LEGACY_END_MARKER);
+  const blocks = [[START_MARKER, END_MARKER], ...LEGACY_MARKERS]
+    .map(([start, end]) => locateBlock(content, start, end))
+    .filter(Boolean);
 
-  if (current && legacy) {
+  if (blocks.length > 1) {
     throw new Error(`Cannot update AGENTS.md: found multiple ${START_MARKER} blocks`);
   }
 
-  const block = current ?? legacy;
+  const [block] = blocks;
   if (block) {
     return `${content.slice(0, block.start)}${INSTRUCTIONS}${content.slice(block.end)}`;
   }
@@ -79,22 +83,20 @@ async function readIfPresent(path) {
   }
 }
 
-const configuredHome = env.CODEX_HOME?.trim();
-const codexHome = configuredHome ? resolve(configuredHome) : join(homedir(), ".codex");
-const agentsPath = join(codexHome, "AGENTS.md");
-const overridePath = join(codexHome, "AGENTS.override.md");
+export async function installInstructions(agentsDirectory = join(homedir(), ".agents")) {
+  const agentsPath = join(agentsDirectory, "AGENTS.md");
+  await mkdir(agentsDirectory, { recursive: true });
+  const current = await readIfPresent(agentsPath);
+  const updated = applyInstructions(current);
 
-await mkdir(codexHome, { recursive: true });
-const current = await readIfPresent(agentsPath);
-const updated = applyInstructions(current);
-
-if (updated === current) {
-  log(`External coding agent instructions are already present in ${agentsPath}`);
-} else {
-  await writeFile(agentsPath, updated, "utf8");
-  log(`Updated ${agentsPath} with external coding agent instructions`);
+  if (updated === current) {
+    log(`External coding agent instructions are already present in ${agentsPath}`);
+  } else {
+    await writeFile(agentsPath, updated, "utf8");
+    log(`Updated ${agentsPath} with external coding agent instructions`);
+  }
 }
 
-if ((await readIfPresent(overridePath)).trim()) {
-  warn(`Warning: ${overridePath} takes precedence over AGENTS.md, so the appended instructions will not be loaded`);
+if (argv[1] && import.meta.url === pathToFileURL(resolve(argv[1])).href) {
+  await installInstructions();
 }

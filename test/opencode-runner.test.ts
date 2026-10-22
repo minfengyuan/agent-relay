@@ -421,12 +421,13 @@ describe("OpenCodeRunner", () => {
       sessionId: created.sessionId as string,
     })).rejects.toMatchObject({ code: "CWD_MISMATCH" });
     vi.stubEnv("GROK_RELAY_DELEGATED", "1");
+    vi.stubEnv("CODEX_AGENT_RELAY_DELEGATED", "1");
     await expect(new OpenCodeRunner(config(state), store).delegate({
       task: "two",
       cwd: other,
       sessionId: created.sessionId as string,
     })).rejects.toMatchObject({ code: "CWD_MISMATCH" });
-    vi.stubEnv("CODEX_AGENT_RELAY_DELEGATED", "1");
+    vi.stubEnv("AGENT_RELAY_DELEGATED", "1");
     await expect(new OpenCodeRunner(config(state), store).delegate({ task: "nested", cwd }))
       .rejects.toMatchObject({ code: "NESTED_DELEGATION" });
   });
