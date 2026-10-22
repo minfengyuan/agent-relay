@@ -1,13 +1,13 @@
 # Architecture
 
-This document explains the durable component boundaries and runtime invariants of `codex-agent-relay`. For day-to-day agent instructions, start with [`AGENTS.md`](AGENTS.md).
+This document explains the durable component boundaries and runtime invariants of `agent-relay`. For day-to-day agent instructions, start with [`AGENTS.md`](AGENTS.md).
 
 ## System context
 
-The relay sits between **Codex/MCP** and locally installed **ACP coding-agent CLIs**:
+The relay sits between **MCP clients** and locally installed **ACP coding-agent CLIs**:
 
 ```text
-Codex
+MCP client
   │ MCP over stdio
   ▼
 src/cli.ts → src/cli-runtime.ts
@@ -24,7 +24,7 @@ Provider CLI
 (Grok / Cursor / OpenCode / DSH)
 ```
 
-The relay is an orchestration boundary, not a second autonomous planner. Codex chooses what to delegate and reviews/integrates the result; the relay executes one non-interactive provider turn and returns a resumable session ID plus bounded output.
+The relay is an orchestration boundary, not a second autonomous planner. The calling client chooses what to delegate and reviews/integrates the result; the relay executes one non-interactive provider turn and returns a resumable session ID plus bounded output.
 
 ## Layer boundaries
 
@@ -56,7 +56,7 @@ A public tool-contract change normally begins here and must stay synchronized wi
 
 `AcpRunner` owns the common ACP lifecycle:
 
-1. Reject nested delegation when `CODEX_AGENT_RELAY_DELEGATED=1`.
+1. Reject nested delegation when `AGENT_RELAY_DELEGATED=1`.
 2. Validate provider input through the adapter hook.
 3. Acquire the per-`cwd` workspace lock.
 4. Load persisted session metadata when a `sessionId` is supplied.
@@ -155,7 +155,7 @@ structured MCP result
 
 ## Session semantics
 
-The relay persists only the metadata needed to safely reconnect Codex to a provider-owned ACP session. The provider remains the source of truth for conversation state.
+The relay persists only the metadata needed to safely reconnect an MCP client to a provider-owned ACP session. The provider remains the source of truth for conversation state.
 
 Important consequences:
 
@@ -170,7 +170,7 @@ Important consequences:
 
 | Concern | Grok | Cursor | OpenCode | DSH |
 | --- | --- | --- | --- | --- |
-| CLI default | `grok` | explicit `CODEX_AGENT_RELAY_CURSOR_COMMAND` required | `opencode` | `dsh --profile acp` |
+| CLI default | `grok` | explicit `AGENT_RELAY_CURSOR_COMMAND` required | `opencode` | `dsh --profile acp` |
 | Authentication | `xai.api_key` when available, otherwise `cached_token` | `cursor_login` | `opencode-login` when advertised; no auth request when none advertised | no authenticate request |
 | Existing session | common load behavior | common load behavior with persisted mode/model checks | prefers ACP resume, falls back to load; `resume: false` forces load | resume only when advertised; never load or fall back to new |
 | Successful completion | process cleanup | process cleanup | process cleanup | requires advertised `session/close`; waits for close before reporting success |
@@ -241,7 +241,7 @@ Guidelines:
 - 1h total delegation timeout.
 - 5s ACP cancellation grace.
 - 2s process termination grace.
-- 2s forced-termination confirmation (`CODEX_AGENT_RELAY_KILL_CONFIRM_MS`).
+- 2s forced-termination confirmation (`AGENT_RELAY_KILL_CONFIRM_MS`).
 - 256 KiB text limit.
 - 64 KiB stderr tail.
 - 1s progress interval.

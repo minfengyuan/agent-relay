@@ -24,7 +24,10 @@ afterEach(async () => {
   }
 });
 
-async function harness(overrides: Partial<ReturnType<typeof loadConfig>> = {}) {
+async function harness(
+  overrides: Partial<ReturnType<typeof loadConfig>> = {},
+  clientInfo = { name: "test", version: "1" },
+) {
   const stateDir = await mkdtemp(join(tmpdir(), "relay-server-"));
   dirs.push(stateDir);
   const server = createRelayServer({ ...loadConfig({}), stateDir, ...overrides });
@@ -48,13 +51,33 @@ async function harness(overrides: Partial<ReturnType<typeof loadConfig>> = {}) {
   const init = await request(1, "initialize", {
     protocolVersion: "2025-11-25",
     capabilities: {},
-    clientInfo: { name: "test", version: "1" },
+    clientInfo,
   });
   await clientTransport.send({ jsonrpc: "2.0", method: "notifications/initialized" });
   return { server, clientTransport, request, notify, notifications, init, stateDir };
 }
 
 describe("MCP server", () => {
+  it.each(["local-tool-client", "custom-orchestrator"])("accepts %s as the calling MCP client", async (name) => {
+    const { server, clientTransport, request, init } = await harness({
+      command: process.execPath,
+      commandArgs: [grokFixture],
+    }, { name, version: "1" });
+    try {
+      expect(init).toHaveProperty("result.serverInfo.name", "agent-relay");
+      const discovery = await request(2, "tools/list") as { result?: { tools?: unknown[] } };
+      expect(discovery.result?.tools).toHaveLength(4);
+      const response = await request(3, "tools/call", {
+        name: "grok_delegate", arguments: { task: "hello", cwd: process.cwd() },
+      }) as { result?: { isError?: boolean; content?: Array<{ text?: string }>; structuredContent?: unknown } };
+      expect(response.result?.isError).not.toBe(true);
+      expect(response.result?.structuredContent).toMatchObject({ sessionId: "fake-session-1" });
+      expect(JSON.parse(response.result?.content?.[0]?.text ?? "null")).toEqual(response.result?.structuredContent);
+    } finally {
+      await clientTransport.close();
+      await server.close();
+    }
+  });
   it.each(["WORKSPACE_ORPHANED", "STALE_LOCK_UNVERIFIED", "LOCK_OWNERSHIP_LOST"] as const)(
     "preserves %s in matching text and structured errors", async (code) => {
       vi.spyOn(SessionStore.prototype, "acquire").mockRejectedValue(new RelayFailure(code, "lease failure"));
@@ -71,7 +94,7 @@ describe("MCP server", () => {
   );
   it("discovers Grok, Cursor, OpenCode, and DSH delegation with their input contracts", async () => {
     const { server, clientTransport, request, init } = await harness();
-    expect(init).toHaveProperty("result.serverInfo.name", "codex-agent-relay");
+    expect(init).toHaveProperty("result.serverInfo.name", "agent-relay");
     const response = await request(2, "tools/list");
     expect(response).toHaveProperty("result.tools.0.name", "grok_delegate");
     expect(response).toHaveProperty("result.tools.0.inputSchema.required", ["task", "cwd"]);

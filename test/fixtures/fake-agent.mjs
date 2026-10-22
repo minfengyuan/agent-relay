@@ -21,7 +21,7 @@ if (mode === "malformed") {
       log(`initialize:${JSON.stringify(ctx.params.clientCapabilities)}`);
       log(`client:${JSON.stringify(ctx.params.clientInfo)}`);
       log(`argv:${JSON.stringify(process.argv.slice(2))}`);
-      log(`delegated:${process.env.CODEX_AGENT_RELAY_DELEGATED ?? ""}`);
+      log(`delegated:${process.env.AGENT_RELAY_DELEGATED ?? ""}`);
       return {
         protocolVersion: 1,
         agentCapabilities: { loadSession: mode !== "no-load" },

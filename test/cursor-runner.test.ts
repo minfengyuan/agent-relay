@@ -38,7 +38,7 @@ describe("CursorRunner", () => {
     expect(events).toContain("auth:cursor_login");
     expect(events).toContain("load:fake-session-1");
     expect(events).toContain("delegated:1");
-    expect(events).toContain('"name":"codex-agent-relay"');
+    expect(events).toContain('"name":"agent-relay"');
     expect(events).toContain("Work non-interactively.");
   }, 15_000);
 
@@ -50,9 +50,10 @@ describe("CursorRunner", () => {
     await expect(new CursorRunner(settings, new SessionStore(state, "cursor")).delegate({ task: "one", cwd }))
       .rejects.toMatchObject({ code: "CURSOR_COMMAND_REQUIRED" });
     vi.stubEnv("GROK_RELAY_DELEGATED", "1");
+    vi.stubEnv("CODEX_AGENT_RELAY_DELEGATED", "1");
     await expect(new CursorRunner(config(state), new SessionStore(state, "cursor")).delegate({ task: "one", cwd }))
       .resolves.toMatchObject({ sessionId: "fake-session-1" });
-    vi.stubEnv("CODEX_AGENT_RELAY_DELEGATED", "1");
+    vi.stubEnv("AGENT_RELAY_DELEGATED", "1");
     await expect(new CursorRunner(config(state), new SessionStore(state, "cursor")).delegate({ task: "one", cwd }))
       .rejects.toMatchObject({ code: "NESTED_DELEGATION" });
   });

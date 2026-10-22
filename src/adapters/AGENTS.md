@@ -63,7 +63,7 @@ When changing an existing adapter, walk through the contract in this order:
 
 ### Cursor
 
-- `CODEX_AGENT_RELAY_CURSOR_COMMAND` is required; do not silently guess an executable path.
+- `AGENT_RELAY_CURSOR_COMMAND` is required; do not silently guess an executable path.
 - The CLI is launched with sandboxing enabled.
 - Mode defaults to `agent`; `ask` and `model` are session-stable and persisted in the session record.
 - Resuming with conflicting mode/model must fail with `SESSION_OPTION_CONFLICT`.
@@ -83,7 +83,7 @@ When changing an existing adapter, walk through the contract in this order:
 
 ### DSH
 
-- Command defaults to `dsh` with args `--profile acp`. `CODEX_AGENT_RELAY_DSH_COMMAND` may override the executable; `dshCommandArgs` is a complete test override with no args env. On Windows, resolve that executable in this adapter under `shell: false`: PATH/PATHEXT lookup, native `.exe`/`.com`, direct `.js`/`.mjs` via `process.execPath`, and conservative parsing of known npm/pnpm `.cmd` shims to `@deepseek-ai/dsh/lib/bin.js` after `bin.dsh` verification. Do not spawn `cmd.exe` or set `shell: true`.
+- Command defaults to `dsh` with args `--profile acp`. `AGENT_RELAY_DSH_COMMAND` may override the executable; `dshCommandArgs` is a complete test override with no args env. On Windows, resolve that executable in this adapter under `shell: false`: PATH/PATHEXT lookup, native `.exe`/`.com`, direct `.js`/`.mjs` via `process.execPath`, and conservative parsing of known npm/pnpm `.cmd` shims to `@deepseek-ai/dsh/lib/bin.js` after `bin.dsh` verification. Do not spawn `cmd.exe` or set `shell: true`.
 - Do not send an authenticate request. Advertised client capabilities are empty.
 - Existing sessions use ACP resume only when `hasResumeCapability` is present; otherwise fail with `RESUME_UNSUPPORTED`. Never load or create a replacement session.
 - `model` and `reasoningEffort` map to advertised `model` and `reasoning_effort` config options. Refresh `configOptions` after each set. Missing options are `CONFIG_UNSUPPORTED`; invalid values are `INVALID_CONFIG`.
@@ -104,7 +104,7 @@ Adding a provider is intentionally more than creating one adapter file. At minim
 8. `test/fixtures/` — add/extend a deterministic fake ACP agent when provider behavior differs.
 9. `test/<provider>-runner.test.ts` and `test/server.test.ts` — cover adapter semantics and MCP wiring.
 10. `README.md` and `README.zh-CN.md` — document the supported provider, tool name, setup, and examples.
-11. `scripts/append-codex-agent-relay-instructions.mjs` and its tests — update only if the recommended Codex delegation guidance must mention the provider.
+11. `scripts/append-agent-relay-instructions.mjs` and its tests — update only if the recommended delegation guidance must mention the provider.
 
 Prefer an isolated `SessionStore` namespace for a new provider unless compatibility with an existing namespace is intentional.
 

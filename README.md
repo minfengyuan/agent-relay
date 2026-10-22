@@ -1,18 +1,18 @@
-# codex-agent-relay
+# agent-relay
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Delegate Codex tasks to **Grok**, **Cursor**, **OpenCode**, and **DSH** through one local MCP server.
+Run **Grok**, **Cursor**, **OpenCode**, and **DSH** through one local MCP server from any MCP client that supports stdio.
 
-`codex-agent-relay` bridges Codex MCP calls to ACP-capable coding agents. Codex remains responsible for orchestration and review; the relay delegates work and returns the agent result together with a resumable session ID.
+`agent-relay` bridges MCP tool calls to locally installed ACP-capable coding agents. The calling client handles orchestration and review; the relay runs one non-interactive agent turn and returns bounded output together with a resumable session ID.
 
 ## Why use it?
 
-- **One MCP server, multiple coding agents** — switch between Grok, Cursor, OpenCode, and DSH without changing the Codex workflow.
-- **Resumable sessions** — continue delegated work instead of starting from scratch every turn.
-- **Worktree-friendly delegation** — run independent tasks in different working directories in parallel.
-- **Local-first** — agents run through their local CLIs and use their existing authentication and configuration.
-- **Codex remains the orchestrator** — review diffs, run tests, and decide what to integrate from one place.
+- **One MCP server, multiple coding agents** — use the same tools from different MCP clients.
+- **Resumable sessions** — continue work instead of starting from scratch every turn.
+- **Worktree-friendly execution** — run independent tasks in different working directories in parallel.
+- **Local execution** — agents run through their local CLIs and use their existing authentication and configuration.
+- **Caller-controlled orchestration** — the calling client decides what to run, reviews changes, and chooses what to integrate.
 
 ## Supported agents
 
@@ -30,51 +30,73 @@ Delegate Codex tasks to **Grok**, **Cursor**, **OpenCode**, and **DSH** through 
 - Node.js 22+
 - pnpm 12+
 - At least one supported agent CLI installed and authenticated
+- An MCP client that can launch a local stdio server
 
 ### 2. Install and build
 
 ```bash
-git clone https://github.com/minfengyuan/codex-agent-relay.git
-cd codex-agent-relay
+git clone https://github.com/minfengyuan/codex-agent-relay.git agent-relay
+cd agent-relay
 pnpm install
 pnpm build
 ```
 
-The MCP entry point is `dist/cli.js`.
+The source repository still uses its original URL. The MCP entry point is `dist/cli.js`; the package's executable is named `agent-relay`.
 
-### 3. Add it to Codex
+### 3. Connect an MCP client
 
-Add the relay to your Codex MCP configuration using an absolute path:
+Configure your client to launch:
+
+```bash
+node /ABSOLUTE/PATH/agent-relay/dist/cli.js
+```
+
+For clients using an `mcpServers` JSON configuration, the following is an example. Adapt the configuration location and format to your client:
+
+```json
+{
+  "mcpServers": {
+    "agent-relay": {
+      "command": "node",
+      "args": ["/ABSOLUTE/PATH/agent-relay/dist/cli.js"],
+      "env": {
+        "AGENT_RELAY_CURSOR_COMMAND": "/ABSOLUTE/PATH/TO/cursor-agent"
+      }
+    }
+  }
+}
+```
+
+Cursor requires an explicit executable path. Grok, OpenCode, and DSH default to `grok`, `opencode`, and `dsh` on PATH. You only need to install and authenticate the agents you intend to call.
+
+The relay uses stdio, with stdout reserved for MCP messages. Tasks default to a one-hour total timeout. Set the client's tool-call timeout to at least 3660 seconds when available, and keep it above any custom relay total timeout. Client timeout and progress settings are client-specific.
+
+For Codex, an optional TOML configuration is:
 
 ```toml
-[mcp_servers.codex_agent_relay]
+[mcp_servers.agent_relay]
 command = "node"
-args = ["/ABSOLUTE/PATH/codex-agent-relay/dist/cli.js"]
+args = ["/ABSOLUTE/PATH/agent-relay/dist/cli.js"]
 startup_timeout_sec = 10
 tool_timeout_sec = 3660
+
+[mcp_servers.agent_relay.env]
+AGENT_RELAY_CURSOR_COMMAND = "/ABSOLUTE/PATH/TO/cursor-agent"
 ```
-
-Grok defaults to `grok` and OpenCode defaults to `opencode`. Cursor must be configured explicitly:
-
-```toml
-[mcp_servers.codex_agent_relay.env]
-CODEX_AGENT_RELAY_CURSOR_COMMAND = "/ABSOLUTE/PATH/TO/cursor-agent"
-```
-
-If needed, override executable paths with `CODEX_AGENT_RELAY_GROK_COMMAND` and `CODEX_AGENT_RELAY_OPENCODE_COMMAND`.
 
 ### 4. Optional: install delegation guidance
 
 ```bash
-pnpm setup:codex-instructions
+pnpm setup:instructions
 ```
 
-This adds the recommended delegation guidance to your Codex instructions while preserving unrelated content.
-The guidance permits delegation only to an agent explicitly named by the user; otherwise, Codex performs the task itself.
+This installs client-neutral delegation guidance into `~/.agents/AGENTS.md`, preserving unrelated content and updating the managed block on repeated runs. Complete historical managed blocks in that target file are replaced; malformed or multiple blocks cause the command to fail without changing the file.
+
+Configure your client to load that file, or copy its guidance into the client's supported instruction location. Not every MCP client reads `~/.agents/AGENTS.md` automatically. The guidance permits delegation only to an agent explicitly named by the user; otherwise, the calling agent performs the task itself. The installer does not configure the MCP client.
 
 ## Usage
 
-Once configured, ask Codex to delegate work in natural language:
+Ask your configured client to run a named agent, for example:
 
 ```text
 Use Grok to review the current changes in /path/to/worktree and run the relevant tests.
@@ -86,38 +108,63 @@ Delegate this implementation task to OpenCode in /path/to/worktree.
 Delegate this implementation task to DSH in /path/to/worktree.
 ```
 
-The relay exposes four tools:
-
-- `grok_delegate`
-- `cursor_delegate`
-- `opencode_delegate`
-- `dsh_delegate`
-
-Each call needs a task and an absolute working directory. Returned `sessionId` values can be passed back to the same tool to continue the corresponding agent session.
-
-## Recommended workflow
+Each tool takes a `task` and an absolute `cwd`. Pass a returned `sessionId` to the same tool with the same working directory to continue that provider's session. Optional provider-specific inputs are exposed through MCP tool discovery; the four tool names and their input/output contracts are unchanged by the project rename.
 
 ```text
-Codex chooses a task and worktree
+Calling client chooses a task and worktree
         ↓
-codex-agent-relay delegates it
+agent-relay executes one provider turn
         ↓
 Grok / Cursor / OpenCode / DSH works locally
         ↓
-Codex reviews the result, diff, and tests
+Calling client reviews the result, diff, and tests
         ↓
-Codex integrates or follows up
+Calling client integrates or follows up
 ```
 
-Use separate worktrees for independent tasks when you want parallel delegation. Calls targeting the same working directory are serialized to avoid concurrent modifications.
+Use separate worktrees for independent parallel tasks. Only one task may be active per resolved working directory; overlapping calls to that directory return `WORKSPACE_BUSY`.
+
+## Configuration
+
+Set these environment variables on the MCP server process:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AGENT_RELAY_GROK_COMMAND` | `grok` | Grok executable |
+| `AGENT_RELAY_CURSOR_COMMAND` | Required for Cursor | Cursor executable |
+| `AGENT_RELAY_OPENCODE_COMMAND` | `opencode` | OpenCode executable |
+| `AGENT_RELAY_DSH_COMMAND` | `dsh` | DSH executable |
+| `AGENT_RELAY_STATE_DIR` | `~/.local/agent-relay` | Session metadata and workspace locks |
+| `AGENT_RELAY_PHASE_TIMEOUT_MS` | `30000` | ACP phase timeout |
+| `AGENT_RELAY_TOTAL_TIMEOUT_MS` | `3600000` | Total task timeout |
+| `AGENT_RELAY_CANCEL_GRACE_MS` | `5000` | Cancellation grace period |
+| `AGENT_RELAY_TERM_GRACE_MS` | `2000` | Grace period before forced termination |
+| `AGENT_RELAY_KILL_CONFIRM_MS` | `2000` | Forced-termination confirmation timeout |
+| `AGENT_RELAY_TEXT_LIMIT_BYTES` | `262144` | Retained text limit |
+| `AGENT_RELAY_STDERR_LIMIT_BYTES` | `65536` | Retained stderr limit |
+| `AGENT_RELAY_PROGRESS_INTERVAL_MS` | `1000` | Minimum progress notification interval |
+
+Numeric settings require positive safe integers; invalid values use their defaults. `AGENT_RELAY_DELEGATED=1` is an internal child-process marker used to reject nested relay delegation; do not set it on the top-level server.
+
+## Migrating from codex-agent-relay
+
+This rename intentionally removes old command and environment-variable aliases:
+
+1. Stop all old relay instances and wait for their tasks and child processes to finish before switching. Do not run old and new instances against the same workspaces during migration.
+2. Change the executable name to `agent-relay` where used, and replace every `CODEX_AGENT_RELAY_*` setting with `AGENT_RELAY_*`. Update the registered server entry and absolute paths if necessary. The four MCP tool names remain unchanged.
+3. The default state directory changes from `~/.local/codex-agent-relay` to `~/.local/agent-relay`. To retain sessions, move the **complete** state directory, including sessions and locks, while preserving permissions. Use an unused destination; do not merge two existing state directories. Alternatively, set `AGENT_RELAY_STATE_DIR` to the existing directory. Session and lock formats have not changed. An unresolved orphaned lock still needs investigation; migration does not make it safe to delete.
+4. Replace `pnpm setup:codex-instructions` with `pnpm setup:instructions`. The installer now targets `~/.agents/AGENTS.md` and ignores `CODEX_HOME`. It does not remove instructions previously installed into `~/.codex/AGENTS.md`; review those manually if your client still loads them.
+
+The relay does not automatically migrate state or modify client configuration.
 
 ## Important notes
 
-- Authenticate each agent CLI before delegating work. Do not place credentials in task arguments.
+- Authenticate each agent CLI before calling it. Do not place credentials in task arguments.
 - The relay does not create worktrees or automatically accept an agent's changes.
-- Filesystem, network, and permission behavior ultimately depends on the selected agent and its local configuration.
-- Delegated workers are cleaned up as process trees. If cleanup cannot be confirmed, the relay keeps the workspace locked rather than assuming it is safe.
-- Treat delegated output as work to review: inspect the actual diff and run the relevant checks before integrating it.
+- Filesystem, network, and permission behavior depends on the selected agent and its local configuration.
+- Workers are cleaned up as process trees. If cleanup cannot be confirmed, the relay keeps the workspace locked.
+- Inspect the actual diff and run the relevant checks before integrating a result.
+- Keep this relay out of downstream agents' MCP configuration to avoid recursive delegation.
 
 ## Development
 
@@ -128,4 +175,4 @@ pnpm test
 pnpm build
 ```
 
-For real-agent smoke tests, see the corresponding scripts in `package.json`.
+The default suite uses fake ACP agents. Real-agent smoke tests are opt-in; see [`test/AGENTS.md`](test/AGENTS.md).

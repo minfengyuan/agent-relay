@@ -29,7 +29,7 @@ export function resolveWindowsDshLauncher(
   const found = locateCommand(command, env);
   if (!found) {
     throw fail(
-      `Cannot find the DSH command ${JSON.stringify(command)} on PATH. Set CODEX_AGENT_RELAY_DSH_COMMAND to a native .exe/.com, a .js/.mjs entry, or a supported npm/pnpm dsh.cmd shim.`,
+      `Cannot find the DSH command ${JSON.stringify(command)} on PATH. Set AGENT_RELAY_DSH_COMMAND to a native .exe/.com, a .js/.mjs entry, or a supported npm/pnpm dsh.cmd shim.`,
     );
   }
   return interpretLauncher(found);
@@ -45,7 +45,7 @@ function interpretLauncher(found: string): WindowsDshLauncher {
   }
   if (ext === ".bat") {
     throw fail(
-      `Windows DSH launcher ${found} is a .bat script; the relay cannot spawn batch files with shell:false. Set CODEX_AGENT_RELAY_DSH_COMMAND to a native .exe/.com, a .js/.mjs entry, or a supported npm/pnpm dsh.cmd shim.`,
+      `Windows DSH launcher ${found} is a .bat script; the relay cannot spawn batch files with shell:false. Set AGENT_RELAY_DSH_COMMAND to a native .exe/.com, a .js/.mjs entry, or a supported npm/pnpm dsh.cmd shim.`,
     );
   }
   if (ext === ".cmd") {
@@ -56,7 +56,7 @@ function interpretLauncher(found: string): WindowsDshLauncher {
     return { command: found, prefixArgs: [] };
   }
   throw fail(
-    `Windows DSH launcher ${found} uses unsupported extension ${ext}. Set CODEX_AGENT_RELAY_DSH_COMMAND to a native .exe/.com, a .js/.mjs entry, or a supported npm/pnpm dsh.cmd shim.`,
+    `Windows DSH launcher ${found} uses unsupported extension ${ext}. Set AGENT_RELAY_DSH_COMMAND to a native .exe/.com, a .js/.mjs entry, or a supported npm/pnpm dsh.cmd shim.`,
   );
 }
 
@@ -104,13 +104,13 @@ function parseAndVerifyCmdShim(shimPath: string): string {
   } catch (error) {
     if (error instanceof RelayFailure) throw error;
     throw fail(
-      `Windows DSH launcher ${shimPath} is not a readable npm/pnpm .cmd shim. Point CODEX_AGENT_RELAY_DSH_COMMAND at the official DSH .js/.mjs entry or a native DSH .exe/.com.`,
+      `Windows DSH launcher ${shimPath} is not a readable npm/pnpm .cmd shim. Point AGENT_RELAY_DSH_COMMAND at the official DSH .js/.mjs entry or a native DSH .exe/.com.`,
     );
   }
   const extracted = extractShimEntry(content, shimPath);
   if (!isFile(extracted)) {
     throw fail(
-      `Windows DSH .cmd shim ${shimPath} points at missing entry ${extracted}. Reinstall ${DSH_PACKAGE_NAME} or set CODEX_AGENT_RELAY_DSH_COMMAND to a working launcher.`,
+      `Windows DSH .cmd shim ${shimPath} points at missing entry ${extracted}. Reinstall ${DSH_PACKAGE_NAME} or set AGENT_RELAY_DSH_COMMAND to a working launcher.`,
     );
   }
   return verifyDshPackageEntry(extracted, shimPath);
@@ -122,7 +122,7 @@ function extractShimEntry(content: string, shimPath: string): string {
     if (!DSH_ENTRY_MARKER.test(raw)) continue;
     if (expandShimDirectoryPlaceholders(raw, shimDir) === undefined) {
       throw fail(
-        `Windows DSH launcher ${shimPath} uses an unsupported environment placeholder. The relay expands only the npm/pnpm shim-directory placeholders %dp0% and %~dp0. Point CODEX_AGENT_RELAY_DSH_COMMAND at the official DSH .js/.mjs entry or a native DSH .exe/.com.`,
+        `Windows DSH launcher ${shimPath} uses an unsupported environment placeholder. The relay expands only the npm/pnpm shim-directory placeholders %dp0% and %~dp0. Point AGENT_RELAY_DSH_COMMAND at the official DSH .js/.mjs entry or a native DSH .exe/.com.`,
       );
     }
   }
@@ -243,7 +243,7 @@ function verifyDshPackageEntry(entryPath: string, shimPath: string): string {
     entryReal = realpathSync(entryPath);
   } catch {
     throw fail(
-      `Windows DSH .cmd shim ${shimPath} points at missing entry ${entryPath}. Reinstall ${DSH_PACKAGE_NAME} or set CODEX_AGENT_RELAY_DSH_COMMAND to a working launcher.`,
+      `Windows DSH .cmd shim ${shimPath} points at missing entry ${entryPath}. Reinstall ${DSH_PACKAGE_NAME} or set AGENT_RELAY_DSH_COMMAND to a working launcher.`,
     );
   }
   if (!posixPath(entryReal).toLowerCase().endsWith(DSH_ENTRY_SUFFIX)) {
@@ -332,11 +332,11 @@ function posixPath(path: string): string {
 }
 
 function mismatchMessage(entry: string): string {
-  return `Windows DSH entry ${entry} is not the bin.dsh of an ${DSH_PACKAGE_NAME} package. Set CODEX_AGENT_RELAY_DSH_COMMAND to the official DSH CLI, a native .exe/.com, or a .js/.mjs entry.`;
+  return `Windows DSH entry ${entry} is not the bin.dsh of an ${DSH_PACKAGE_NAME} package. Set AGENT_RELAY_DSH_COMMAND to the official DSH CLI, a native .exe/.com, or a .js/.mjs entry.`;
 }
 
 function unsupportedShimMessage(shimPath: string): string {
-  return `Windows DSH launcher ${shimPath} is not a supported npm/pnpm .cmd shim for ${DSH_PACKAGE_NAME}. Point CODEX_AGENT_RELAY_DSH_COMMAND at the official DSH .js/.mjs entry or a native DSH .exe/.com.`;
+  return `Windows DSH launcher ${shimPath} is not a supported npm/pnpm .cmd shim for ${DSH_PACKAGE_NAME}. Point AGENT_RELAY_DSH_COMMAND at the official DSH .js/.mjs entry or a native DSH .exe/.com.`;
 }
 
 function fail(message: string): RelayFailure {

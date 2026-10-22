@@ -63,8 +63,8 @@ export async function waitForLog(path: string, needle: string, timeoutMs = 6_000
 }
 
 export function clearDelegatedEnv(): void {
-  if (process.env.CODEX_AGENT_RELAY_DELEGATED === "1") {
-    vi.stubEnv("CODEX_AGENT_RELAY_DELEGATED", "");
+  if (process.env.AGENT_RELAY_DELEGATED === "1") {
+    vi.stubEnv("AGENT_RELAY_DELEGATED", "");
   }
 }
 

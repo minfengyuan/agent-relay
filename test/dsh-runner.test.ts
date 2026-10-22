@@ -84,7 +84,7 @@ describe("DshRunner", () => {
   it("constructs default dsh argv when dshCommandArgs is omitted", () => {
     if (process.platform !== "win32") {
       expect(dshSpawnSpec(loadConfig({}))).toEqual({ command: "dsh", args: ["--profile", "acp"] });
-      expect(dshSpawnSpec(loadConfig({ CODEX_AGENT_RELAY_DSH_COMMAND: "  /opt/dsh  " }))).toEqual({
+      expect(dshSpawnSpec(loadConfig({ AGENT_RELAY_DSH_COMMAND: "  /opt/dsh  " }))).toEqual({
         command: "/opt/dsh",
         args: ["--profile", "acp"],
       });
@@ -433,7 +433,7 @@ describe("DshRunner", () => {
       cwd,
       sessionId: created.sessionId as string,
     })).rejects.toMatchObject({ code: "UNKNOWN_SESSION" });
-    vi.stubEnv("CODEX_AGENT_RELAY_DELEGATED", "1");
+    vi.stubEnv("AGENT_RELAY_DELEGATED", "1");
     await expect(new DshRunner(config(state), store).delegate({ task: "nested", cwd }))
       .rejects.toMatchObject({ code: "NESTED_DELEGATION" });
   });

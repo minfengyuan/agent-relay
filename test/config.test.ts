@@ -9,16 +9,16 @@ import type * as acp from "@agentclientprotocol/sdk";
 describe("loadConfig", () => {
   it("defaults to opencode and trims an explicit command", () => {
     expect(loadConfig({}).opencodeCommand).toBe("opencode");
-    expect(loadConfig({ CODEX_AGENT_RELAY_OPENCODE_COMMAND: "  /bin/oc  " }).opencodeCommand).toBe("/bin/oc");
-    expect(loadConfig({ CODEX_AGENT_RELAY_OPENCODE_COMMAND: "   " }).opencodeCommand).toBe("opencode");
+    expect(loadConfig({ AGENT_RELAY_OPENCODE_COMMAND: "  /bin/oc  " }).opencodeCommand).toBe("/bin/oc");
+    expect(loadConfig({ AGENT_RELAY_OPENCODE_COMMAND: "   " }).opencodeCommand).toBe("opencode");
   });
 
   it("defaults to dsh and trims an explicit command without an args env", () => {
     expect(loadConfig({}).dshCommand).toBe("dsh");
     expect(loadConfig({}).dshCommandArgs).toBeUndefined();
     expect(loadConfig({}).dshCommand).toBe("dsh");
-    expect(loadConfig({ CODEX_AGENT_RELAY_DSH_COMMAND: "  /bin/dsh  " }).dshCommand).toBe("/bin/dsh");
-    expect(loadConfig({ CODEX_AGENT_RELAY_DSH_COMMAND: "   " }).dshCommand).toBe("dsh");
+    expect(loadConfig({ AGENT_RELAY_DSH_COMMAND: "  /bin/dsh  " }).dshCommand).toBe("/bin/dsh");
+    expect(loadConfig({ AGENT_RELAY_DSH_COMMAND: "   " }).dshCommand).toBe("dsh");
   });
 
   it("extracts flat and grouped OpenCode-style select values", () => {
@@ -52,11 +52,11 @@ describe("loadConfig", () => {
     expect(dsh.result().provider).toBe("dsh");
   });
 
-  it("reads new config keys and ignores old GROK_RELAY_* keys", () => {
+  it("reads AGENT_RELAY_* config keys", () => {
     const defaults = loadConfig({});
     expect(defaults.command).toBe("grok");
     expect(defaults.cursorCommand).toBeUndefined();
-    expect(defaults.stateDir).toBe(join(homedir(), ".local", "codex-agent-relay"));
+    expect(defaults.stateDir).toBe(join(homedir(), ".local", "agent-relay"));
     expect(defaults.phaseTimeoutMs).toBe(30_000);
     expect(defaults.totalTimeoutMs).toBe(3_600_000);
     expect(defaults.cancelGraceMs).toBe(5_000);
@@ -67,10 +67,10 @@ describe("loadConfig", () => {
     expect(defaults.progressIntervalMs).toBe(1_000);
 
     expect(loadConfig({
-      CODEX_AGENT_RELAY_GROK_COMMAND: "custom-grok",
-      CODEX_AGENT_RELAY_CURSOR_COMMAND: "  /bin/cursor  ",
-      CODEX_AGENT_RELAY_STATE_DIR: "/tmp/relay-state",
-      CODEX_AGENT_RELAY_PHASE_TIMEOUT_MS: "10",
+      AGENT_RELAY_GROK_COMMAND: "custom-grok",
+      AGENT_RELAY_CURSOR_COMMAND: "  /bin/cursor  ",
+      AGENT_RELAY_STATE_DIR: "/tmp/relay-state",
+      AGENT_RELAY_PHASE_TIMEOUT_MS: "10",
     })).toMatchObject({
       command: "custom-grok",
       cursorCommand: "/bin/cursor",
@@ -78,8 +78,8 @@ describe("loadConfig", () => {
       phaseTimeoutMs: 10,
     });
 
-    expect(loadConfig({ CODEX_AGENT_RELAY_KILL_CONFIRM_MS: "17" }).killConfirmMs).toBe(17);
-    expect(loadConfig({ CODEX_AGENT_RELAY_KILL_CONFIRM_MS: "0" }).killConfirmMs).toBe(2_000);
+    expect(loadConfig({ AGENT_RELAY_KILL_CONFIRM_MS: "17" }).killConfirmMs).toBe(17);
+    expect(loadConfig({ AGENT_RELAY_KILL_CONFIRM_MS: "0" }).killConfirmMs).toBe(2_000);
 
     expect(loadConfig({
       GROK_RELAY_GROK_COMMAND: "old-grok",
@@ -94,5 +94,36 @@ describe("loadConfig", () => {
       GROK_RELAY_STDERR_LIMIT_BYTES: "6",
       GROK_RELAY_PROGRESS_INTERVAL_MS: "7",
     })).toEqual(defaults);
+  });
+
+  it("ignores CODEX_AGENT_RELAY_* configuration", () => {
+    const legacy = Object.fromEntries([
+      ["GROK_COMMAND", "old-grok"], ["CURSOR_COMMAND", "/old/cursor"],
+      ["OPENCODE_COMMAND", "/old/opencode"], ["DSH_COMMAND", "/old/dsh"],
+      ["STATE_DIR", "/old/state"], ["PHASE_TIMEOUT_MS", "1"],
+      ["TOTAL_TIMEOUT_MS", "2"], ["CANCEL_GRACE_MS", "3"],
+      ["TERM_GRACE_MS", "4"], ["KILL_CONFIRM_MS", "5"],
+      ["TEXT_LIMIT_BYTES", "6"], ["STDERR_LIMIT_BYTES", "7"],
+      ["PROGRESS_INTERVAL_MS", "8"],
+    ].map(([key, value]) => [`CODEX_AGENT_RELAY_${key}`, value]));
+    expect(loadConfig(legacy)).toEqual(loadConfig({}));
+    expect(loadConfig({ ...legacy, AGENT_RELAY_GROK_COMMAND: "new-grok" }).command).toBe("new-grok");
+  });
+
+  it.each([
+    ["PHASE_TIMEOUT_MS", "phaseTimeoutMs"],
+    ["TOTAL_TIMEOUT_MS", "totalTimeoutMs"],
+    ["CANCEL_GRACE_MS", "cancelGraceMs"],
+    ["TERM_GRACE_MS", "termGraceMs"],
+    ["KILL_CONFIRM_MS", "killConfirmMs"],
+    ["TEXT_LIMIT_BYTES", "textLimitBytes"],
+    ["STDERR_LIMIT_BYTES", "stderrLimitBytes"],
+    ["PROGRESS_INTERVAL_MS", "progressIntervalMs"],
+  ] as const)("reads AGENT_RELAY_%s and falls back for invalid values", (suffix, field) => {
+    const key = `AGENT_RELAY_${suffix}`;
+    expect(loadConfig({ [key]: "17" })[field]).toBe(17);
+    for (const value of ["0", "-1", "1.5", "NaN", "9007199254740992"]) {
+      expect(loadConfig({ [key]: value })[field]).toBe(loadConfig({})[field]);
+    }
   });
 });
