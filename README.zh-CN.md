@@ -35,13 +35,13 @@
 ### 2. 安装并构建
 
 ```bash
-git clone https://github.com/minfengyuan/codex-agent-relay.git agent-relay
+git clone https://github.com/minfengyuan/agent-relay.git
 cd agent-relay
 pnpm install
 pnpm build
 ```
 
-源码仓库仍使用原有地址。MCP 入口为 `dist/cli.js`，包提供的可执行命令名称为 `agent-relay`。
+MCP 入口为 `dist/cli.js`，包提供的可执行命令名称为 `agent-relay`。
 
 ### 3. 接入 MCP 客户端
 

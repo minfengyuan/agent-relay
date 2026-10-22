@@ -35,13 +35,13 @@ Run **Grok**, **Cursor**, **OpenCode**, and **DSH** through one local MCP server
 ### 2. Install and build
 
 ```bash
-git clone https://github.com/minfengyuan/codex-agent-relay.git agent-relay
+git clone https://github.com/minfengyuan/agent-relay.git
 cd agent-relay
 pnpm install
 pnpm build
 ```
 
-The source repository still uses its original URL. The MCP entry point is `dist/cli.js`; the package's executable is named `agent-relay`.
+The MCP entry point is `dist/cli.js`; the package's executable is named `agent-relay`.
 
 ### 3. Connect an MCP client
 
