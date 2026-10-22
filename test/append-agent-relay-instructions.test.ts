@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
-import type * as NodeOs from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -10,13 +9,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const scriptUrl = new URL("../scripts/append-agent-relay-instructions.mjs", import.meta.url);
 const script = fileURLToPath(scriptUrl);
 const execFileAsync = promisify(execFile);
-vi.mock("node:os", async (importOriginal) => {
-  const actual = await importOriginal<typeof NodeOs>();
-  return { ...actual, homedir: vi.fn(actual.homedir) };
-});
-const { installInstructions } = await import(scriptUrl.href) as {
-  installInstructions: (agentsDirectory?: string) => Promise<void>;
-};
 const startMarker = "<!-- AGENT-RELAY_START -->";
 const endMarker = "<!-- AGENT-RELAY_END -->";
 const legacyStartMarker = "<!-- GROK-BUILD_START -->";
@@ -30,12 +22,27 @@ async function tempAgentsDirectory(): Promise<string> {
 }
 
 async function run(agentsDirectory: string) {
-  return installInstructions(agentsDirectory);
+  return execFileAsync(process.execPath, [
+    "--input-type=module", "--eval",
+    "const { installInstructions } = await import(process.argv[1]); await installInstructions(process.argv[2]);",
+    scriptUrl.href, agentsDirectory,
+  ]);
+}
+
+async function runCli(root: string) {
+  const preload = Buffer.from(`
+    import os from "node:os";
+    import { syncBuiltinESMExports } from "node:module";
+    os.homedir = () => process.env.AGENT_RELAY_TEST_HOME;
+    syncBuiltinESMExports();
+  `).toString("base64");
+  return execFileAsync(process.execPath, ["--import", `data:text/javascript;base64,${preload}`, script], {
+    env: { ...process.env, AGENT_RELAY_TEST_HOME: root },
+  });
 }
 
 describe("append-agent-relay-instructions", () => {
   afterEach(async () => {
-    vi.mocked(homedir).mockReset();
     vi.unstubAllEnvs();
     await Promise.all(
       tempDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
@@ -158,11 +165,10 @@ describe("append-agent-relay-instructions", () => {
   it("defaults to ~/.agents/AGENTS.md and ignores CODEX_HOME", async () => {
     const root = await mkdtemp(join(tmpdir(), "agent-relay-home-"));
     tempDirectories.push(root);
-    vi.mocked(homedir).mockReturnValue(root);
     const oldHome = join(root, "old-codex-home");
     vi.stubEnv("CODEX_HOME", oldHome);
 
-    await installInstructions();
+    await runCli(root);
 
     const content = await readFile(join(root, ".agents", "AGENTS.md"), "utf8");
     expect(content).toContain(startMarker);
@@ -174,15 +180,9 @@ describe("append-agent-relay-instructions", () => {
   it("runs the CLI entry point against an isolated home directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "agent-relay-cli-home-"));
     tempDirectories.push(root);
-    const preload = Buffer.from(`
-      import os from "node:os";
-      import { syncBuiltinESMExports } from "node:module";
-      os.homedir = () => process.env.AGENT_RELAY_TEST_HOME;
-      syncBuiltinESMExports();
-    `).toString("base64");
-    await execFileAsync(process.execPath, ["--import", `data:text/javascript;base64,${preload}`, script], {
-      env: { ...process.env, AGENT_RELAY_TEST_HOME: root },
-    });
+    const result = await runCli(root);
     expect(await readFile(join(root, ".agents", "AGENTS.md"), "utf8")).toContain(startMarker);
+    expect(result.stdout).toContain(`Updated ${join(root, ".agents", "AGENTS.md")}`);
+    expect(result.stderr).toBe("");
   });
 });
