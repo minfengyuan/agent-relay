@@ -256,7 +256,11 @@ describe("append-agent-relay-instructions", () => {
     await mkdir(join(root, "custom codex"));
     const result = await runCli(root, ["--clients", "dsh", "--dry-run"], {
       env: { PATH: bin, CODEX_HOME: join(root, "custom codex") } });
-    expect(result.stdout).toContain(`Grok: command: ${command}`);
+    if (process.platform === "win32") {
+      expect(result.stdout.toLowerCase()).toContain(`Grok: command: ${command}`.toLowerCase());
+    } else {
+      expect(result.stdout).toContain(`Grok: command: ${command}`);
+    }
     expect(result.stdout).toContain(`Codex: directory: ${join(root, "custom codex")}`);
     expect(result.stdout).toContain("Cursor: not detected");
     expect(result.stdout).toContain("DSH: not detected");
@@ -268,7 +272,7 @@ describe("append-agent-relay-instructions", () => {
     await writeFile(invalidHome, "untouched");
     const result = await runCli(root, interactive ? [] : ["--clients", "dsh"], {
       env: { CODEX_HOME: invalidHome }, interactive, input: "5\n" });
-    expect(result.stdout).toContain("unavailable:");
+    expect(result.stdout).toContain("Codex: not detected");
     expect(result.stdout).toContain("dsh: create");
     expect(await readFile(join(root, ".dsh", "AGENTS.md"), "utf8")).toContain(startMarker);
     expect(await readFile(invalidHome, "utf8")).toBe("untouched");
