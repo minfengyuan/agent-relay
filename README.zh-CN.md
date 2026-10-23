@@ -91,9 +91,36 @@ AGENT_RELAY_CURSOR_COMMAND = "/ABSOLUTE/PATH/TO/cursor-agent"
 pnpm setup:instructions
 ```
 
-该命令将通用委派指令写入 `~/.agents/AGENTS.md`，保留无关内容，重复运行时更新受管理的指令块。目标文件中完整的历史指令块会被替换；标记损坏或存在多个指令块时，命令会报错且不修改文件。
+该命令检测 **Codex、Cursor、OpenCode、Grok 和 DSH**，展示检测依据和规则目标，然后按编号交互多选。回车选择全部已检测客户端，输入 `q` 取消。检测依据为 PATH 中的命令和已有客户端配置目录，不启动客户端，也不验证认证或 MCP 注册状态。也可显式选择未检测到的客户端。
 
-请配置客户端加载该文件，或将指令复制到客户端支持的位置。并非所有 MCP 客户端都会自动读取 `~/.agents/AGENTS.md`。指令仅允许委派给用户明确提及的 Agent；未指定 Agent 时，由调用方自行完成任务。安装脚本不会配置 MCP 客户端。
+| 客户端 | 规则目标 | 作用范围 |
+| --- | --- | --- |
+| Codex | `$CODEX_HOME/AGENTS.md`，默认 `~/.codex/AGENTS.md`；非空 `AGENTS.override.md` 优先，存在时改为更新它 | 全局 |
+| Cursor | `<project>/.cursor/rules/agent-relay.mdc`，包含 `alwaysApply: true` | 所选项目 |
+| OpenCode | 设置 `$OPENCODE_CONFIG_DIR` 时使用其下的 `AGENTS.md`；否则为 `$XDG_CONFIG_HOME/opencode/AGENTS.md`，默认 `~/.config/opencode/AGENTS.md` | 全局 |
+| Grok | `$GROK_HOME/AGENTS.md`，默认 `~/.grok/AGENTS.md` | 全局 |
+| DSH | `$DSH_HOME/AGENTS.md`，默认 `~/.dsh/AGENTS.md` | 全局 |
+
+Cursor 需要已有项目目录，未提供时会交互询问。其规则仅对该项目生效；全局 User Rules 仍通过 Cursor 设置界面管理。其他客户端使用各自的全局指令文件。环境变量覆盖必须与对应客户端启动时保持一致。
+
+脚本或非交互终端可用逗号分隔的客户端 ID：
+
+```bash
+pnpm setup:instructions --clients codex,opencode,grok,dsh
+pnpm setup:instructions --clients codex,cursor --project /absolute/project
+pnpm setup:instructions --clients codex,cursor --project /absolute/project --dry-run
+pnpm setup:instructions --help
+```
+
+`--clients` 跳过选择，也允许安装未检测到的客户端。非交互输入缺少 `--clients` 时会报错且不写入。`--dry-run` 使用相同的选择和校验规则，预览新增／更新／不变状态，不创建目录或写文件。
+
+安装器将同一份指令正文嵌入所选客户端支持的文件，保留无关内容，重复运行时幂等更新受管理块。所选目标中的完整历史块会被替换。全部目标在写入前完成校验：标记损坏、存在多个受管理块、Cursor 项目无效，或已有同名 `agent-relay.mdc` 不含受管理块时，安装中止且不写入目标。实际写入失败会逐客户端报告，继续尝试其他所选客户端，并以非零退出码结束；已完成的写入不会回滚。
+
+安装器会提示并保留 `~/.agents/AGENTS.md`（或 `$DSH_AGENTS_HOME/AGENTS.md`）中的历史指令，供手动检查；默认不再写入该共享路径。创建 OpenCode 全局 `AGENTS.md` 可能遮蔽其 `~/.claude/CLAUDE.md` 回退规则；回退文件存在且启用时会提示，请在选择 OpenCode 前检查其中的偏好。
+
+安装后请开启新的客户端会话。指令仅允许委派给用户明确提及的 Agent；未指定 Agent 时，由调用方自行完成任务。**安装规则不会注册 relay MCP 服务**：仍需在每个调用方客户端中分别完成第 3 步。文件安装成功不代表已验证客户端运行时加载。
+
+规则入口依据客户端文档：[Codex](https://developers.openai.com/codex/guides/agents-md)、[Cursor](https://cursor.com/docs/rules)、[OpenCode](https://opencode.ai/docs/rules/)（[XDG 配置](https://github.com/anomalyco/opencode/issues/6669)、[自定义目录优先级](https://github.com/anomalyco/opencode/issues/28658)）、[Grok](https://docs.x.ai/build/features/project-rules) 和 [DSH](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/context/agent-instructions)。
 
 ## 使用方式
 
@@ -177,7 +204,7 @@ Grok / Cursor / OpenCode / DSH / Codex 在本地工作
 1. 切换前停止所有旧 relay 实例，等待其任务和子进程结束。迁移期间不要让新旧实例同时操作相同工作区。
 2. 将使用到的可执行命令名称改为 `agent-relay`，将所有 `CODEX_AGENT_RELAY_*` 配置改为 `AGENT_RELAY_*`，并按需更新客户端注册项和绝对路径。四个 MCP 工具名保持不变。
 3. 默认状态目录由 `~/.local/codex-agent-relay` 改为 `~/.local/agent-relay`。如需保留会话，在停止服务后迁移**完整**状态目录，包括会话和锁，并保留权限。目标目录应未被使用，不要合并两套已有状态目录。也可通过 `AGENT_RELAY_STATE_DIR` 显式指向原目录。会话和锁格式未变；仍有未确认清理的孤儿锁时，应先调查原因，迁移不意味着可以安全删除它。
-4. 将 `pnpm setup:codex-instructions` 改为 `pnpm setup:instructions`。安装目标改为 `~/.agents/AGENTS.md`，不再读取 `CODEX_HOME`。脚本不会移除以前写入 `~/.codex/AGENTS.md` 的指令；如果客户端仍会加载它，请手动审查旧内容。
+4. 将 `pnpm setup:codex-instructions` 改为 `pnpm setup:instructions`。安装器现在按客户端检测并写入其支持的位置；Codex 重新读取 `CODEX_HOME`。所选目标中的已有受管理块会更新。旧的 `~/.agents/AGENTS.md` 共享指令会保留并提示手动检查；具体位置见上方客户端表格。
 
 relay 不会自动迁移状态或修改客户端配置。
 
