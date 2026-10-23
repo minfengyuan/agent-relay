@@ -91,9 +91,36 @@ AGENT_RELAY_CURSOR_COMMAND = "/ABSOLUTE/PATH/TO/cursor-agent"
 pnpm setup:instructions
 ```
 
-This installs client-neutral delegation guidance into `~/.agents/AGENTS.md`, preserving unrelated content and updating the managed block on repeated runs. Complete historical managed blocks in that target file are replaced; malformed or multiple blocks cause the command to fail without changing the file.
+The command detects **Codex, Cursor, OpenCode, Grok, and DSH**, shows the evidence and rule destinations, then lets you select multiple clients by number. Press Enter to select all detected clients, or `q` to cancel. Detection uses commands on PATH and existing client configuration directories; it does not launch clients or verify authentication or MCP registration. Undetected clients can also be selected explicitly.
 
-Configure your client to load that file, or copy its guidance into the client's supported instruction location. Not every MCP client reads `~/.agents/AGENTS.md` automatically. The guidance permits delegation only to an agent explicitly named by the user; otherwise, the calling agent performs the task itself. The installer does not configure the MCP client.
+| Client | Rule destination | Scope |
+| --- | --- | --- |
+| Codex | `$CODEX_HOME/AGENTS.md`, default `~/.codex/AGENTS.md`; a non-empty `AGENTS.override.md` takes precedence and is updated instead | Global |
+| Cursor | `<project>/.cursor/rules/agent-relay.mdc`, with `alwaysApply: true` | Selected project |
+| OpenCode | `$OPENCODE_CONFIG_DIR/AGENTS.md` when set; otherwise `$XDG_CONFIG_HOME/opencode/AGENTS.md`, default `~/.config/opencode/AGENTS.md` | Global |
+| Grok | `$GROK_HOME/AGENTS.md`, default `~/.grok/AGENTS.md` | Global |
+| DSH | `$DSH_HOME/AGENTS.md`, default `~/.dsh/AGENTS.md` | Global |
+
+Cursor requires an existing project directory, requested interactively if omitted. Its rule applies only to that project; global User Rules remain managed through Cursor's settings. Other clients use their own global instruction files. Environment overrides must match those used to launch the corresponding client.
+
+For scripts or non-interactive terminals, pass comma-separated client IDs:
+
+```bash
+pnpm setup:instructions --clients codex,opencode,grok,dsh
+pnpm setup:instructions --clients codex,cursor --project /absolute/project
+pnpm setup:instructions --clients codex,cursor --project /absolute/project --dry-run
+pnpm setup:instructions --help
+```
+
+`--clients` skips selection and allows installation for undetected clients. Non-interactive input without `--clients` fails without writing. `--dry-run` uses the same selection and validation rules and previews create/update/unchanged results without creating directories or writing files.
+
+The installer embeds one shared guidance body into each selected client's supported file, preserves unrelated content, and updates its managed block idempotently. Complete historical blocks in the selected target are replaced. Every selected target is validated before any writes: malformed or multiple managed blocks, an invalid Cursor project, or an existing unmanaged `agent-relay.mdc` abort the installation without writing targets. Write failures are reported per client, other selected clients are still attempted, and the command exits nonzero; already completed writes are not rolled back.
+
+Historical guidance in `~/.agents/AGENTS.md` (or `$DSH_AGENTS_HOME/AGENTS.md`) is reported and preserved for manual review; the installer no longer writes that shared path by default. Creating OpenCode's global `AGENTS.md` can shadow its `~/.claude/CLAUDE.md` fallback; the installer warns when that fallback is present and enabled. Review those preferences before selecting OpenCode.
+
+Start a new client session after installation. The guidance permits delegation only to an agent explicitly named by the user; otherwise, the calling agent performs the task itself. **Rules installation does not register the relay MCP server**: complete step 3 separately in each calling client. File installation success is not a runtime client-loading check.
+
+Rule locations follow the clients' documentation: [Codex](https://developers.openai.com/codex/guides/agents-md), [Cursor](https://cursor.com/docs/rules), [OpenCode](https://opencode.ai/docs/rules/) ([XDG configuration](https://github.com/anomalyco/opencode/issues/6669), [custom directory precedence](https://github.com/anomalyco/opencode/issues/28658)), [Grok](https://docs.x.ai/build/features/project-rules), and [DSH](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/context/agent-instructions).
 
 ## Usage
 
@@ -177,7 +204,7 @@ This rename intentionally removes old command and environment-variable aliases:
 1. Stop all old relay instances and wait for their tasks and child processes to finish before switching. Do not run old and new instances against the same workspaces during migration.
 2. Change the executable name to `agent-relay` where used, and replace every `CODEX_AGENT_RELAY_*` setting with `AGENT_RELAY_*`. Update the registered server entry and absolute paths if necessary. The four MCP tool names remain unchanged.
 3. The default state directory changes from `~/.local/codex-agent-relay` to `~/.local/agent-relay`. To retain sessions, move the **complete** state directory, including sessions and locks, while preserving permissions. Use an unused destination; do not merge two existing state directories. Alternatively, set `AGENT_RELAY_STATE_DIR` to the existing directory. Session and lock formats have not changed. An unresolved orphaned lock still needs investigation; migration does not make it safe to delete.
-4. Replace `pnpm setup:codex-instructions` with `pnpm setup:instructions`. The installer now targets `~/.agents/AGENTS.md` and ignores `CODEX_HOME`. It does not remove instructions previously installed into `~/.codex/AGENTS.md`; review those manually if your client still loads them.
+4. Replace `pnpm setup:codex-instructions` with `pnpm setup:instructions`. The installer now detects clients and installs guidance into their supported locations; Codex honors `CODEX_HOME` again. Existing managed blocks in selected targets are updated. Older shared guidance in `~/.agents/AGENTS.md` is preserved and reported for manual review; see the client table above.
 
 The relay does not automatically migrate state or modify client configuration.
 
