@@ -2,9 +2,9 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Run **Grok**, **Cursor**, **OpenCode**, and **DSH** through one local MCP server from any MCP client that supports stdio.
+Run **Grok**, **Cursor**, **OpenCode**, **DSH**, and **Codex** through one local MCP server from any MCP client that supports stdio.
 
-`agent-relay` bridges MCP tool calls to locally installed ACP-capable coding agents. The calling client handles orchestration and review; the relay runs one non-interactive agent turn and returns bounded output together with a resumable session ID.
+`agent-relay` bridges MCP tool calls to local coding agents through ACP or the native Codex app-server. The calling client handles orchestration and review; the relay runs one non-interactive agent turn and returns bounded output together with a resumable session ID.
 
 ## Why use it?
 
@@ -22,6 +22,7 @@ Run **Grok**, **Cursor**, **OpenCode**, and **DSH** through one local MCP server
 | Cursor | `cursor_delegate` | Agent or ask-mode coding tasks |
 | OpenCode | `opencode_delegate` | Coding tasks with optional model/effort/agent selection |
 | DSH | `dsh_delegate` | Coding tasks through DeepSeek Harness |
+| Codex | `codex_delegate` | Coding tasks through the native Codex app-server |
 
 ## Quick start
 
@@ -67,7 +68,7 @@ For clients using an `mcpServers` JSON configuration, the following is an exampl
 }
 ```
 
-Cursor requires an explicit executable path. Grok, OpenCode, and DSH default to `grok`, `opencode`, and `dsh` on PATH. You only need to install and authenticate the agents you intend to call.
+Cursor requires an explicit executable path. Grok, OpenCode, DSH, and Codex default to `grok`, `opencode`, `dsh`, and `codex` on PATH. You only need to install and authenticate the agents you intend to call.
 
 The relay uses stdio, with stdout reserved for MCP messages. Tasks default to a one-hour total timeout. Set the client's tool-call timeout to at least 3660 seconds when available, and keep it above any custom relay total timeout. Client timeout and progress settings are client-specific.
 
@@ -106,16 +107,18 @@ Ask Cursor to inspect the authentication flow without editing files.
 Delegate this implementation task to OpenCode in /path/to/worktree.
 
 Delegate this implementation task to DSH in /path/to/worktree.
+
+Delegate this implementation task to Codex in /path/to/worktree.
 ```
 
-Each tool takes a `task` and an absolute `cwd`. Pass a returned `sessionId` to the same tool with the same working directory to continue that provider's session. Optional provider-specific inputs are exposed through MCP tool discovery; the four tool names and their input/output contracts are unchanged by the project rename.
+Each tool takes a `task` and an absolute `cwd`. Pass a returned `sessionId` to the same tool with the same working directory to continue that provider's session. Optional provider-specific inputs are exposed through MCP tool discovery; the four existing ACP tools retain their contracts alongside the new `codex_delegate` tool.
 
 ```text
 Calling client chooses a task and worktree
         ↓
 agent-relay executes one provider turn
         ↓
-Grok / Cursor / OpenCode / DSH works locally
+Grok / Cursor / OpenCode / DSH / Codex works locally
         ↓
 Calling client reviews the result, diff, and tests
         ↓
@@ -123,6 +126,26 @@ Calling client integrates or follows up
 ```
 
 Use separate worktrees for independent parallel tasks. Only one task may be active per resolved working directory; overlapping calls to that directory return `WORKSPACE_BUSY`.
+
+### Codex
+
+Install and authenticate the Codex CLI before calling `codex_delegate`; no ACP bridge package is needed. The relay launches `codex app-server --listen stdio://` directly and uses the CLI's existing authentication. It does not initiate login. Protocol compatibility is based on Codex CLI 0.163.0; older versions are unverified. On Windows, point `AGENT_RELAY_CODEX_COMMAND` at a native `codex.exe`; `.cmd`/`.bat` launchers are unsupported.
+
+Inputs are `task`, absolute `cwd`, and optional `sessionId`, `model`, and `reasoningEffort`. The returned `sessionId` is the Codex `thread.id`; only relay-recorded IDs may be resumed in their original directory. Restoring a missing thread fails rather than creating a replacement. Explicit model/effort values update the live thread; omitted values preserve restored/default settings. Invalid options are reported by Codex as `CODEX_FAILURE`.
+
+```json
+{
+  "task": "Implement the requested change and run the relevant checks.",
+  "cwd": "/absolute/path/to/worktree",
+  "reasoningEffort": "high"
+}
+```
+
+New and resumed turns use workspace-write sandboxing, disabled sandbox network access, default temporary-directory access, and user-routed approvals. Extra approvals are declined with `PERMISSION_REQUIRED`; questions/elicitation fail with `INTERACTION_REQUIRED`. Local Codex/MCP configuration still applies; this is not isolation of external MCP services or model API traffic. Keep this relay out of the worker's MCP configuration.
+
+Results include `provider: "codex"`, `sessionId`, `stopReason`, `text`, and `truncated`, plus optional bounded `toolCalls`, `summariesTruncated`, and native token `usage` (`total`, `last`, `modelContextWindow`). Only a completed turn succeeds. Failure retains confirmed session IDs and partial output; cancellation/timeout interrupts the turn and cleans up its process tree. Protocol incompatibility returns `PROTOCOL_MISMATCH`; other native failures use `CODEX_FAILURE`.
+
+Run the opt-in authenticated smoke with `pnpm test:real:codex` (or `RUN_CODEX_REAL_TESTS=1 pnpm exec vitest run test/codex-real-smoke.test.ts`). It uses disposable state/workspaces but the real Codex account and service.
 
 ## Configuration
 
@@ -134,8 +157,9 @@ Set these environment variables on the MCP server process:
 | `AGENT_RELAY_CURSOR_COMMAND` | Required for Cursor | Cursor executable |
 | `AGENT_RELAY_OPENCODE_COMMAND` | `opencode` | OpenCode executable |
 | `AGENT_RELAY_DSH_COMMAND` | `dsh` | DSH executable |
+| `AGENT_RELAY_CODEX_COMMAND` | `codex` | Native Codex executable |
 | `AGENT_RELAY_STATE_DIR` | `~/.local/agent-relay` | Session metadata and workspace locks |
-| `AGENT_RELAY_PHASE_TIMEOUT_MS` | `30000` | ACP phase timeout |
+| `AGENT_RELAY_PHASE_TIMEOUT_MS` | `30000` | Protocol phase timeout |
 | `AGENT_RELAY_TOTAL_TIMEOUT_MS` | `3600000` | Total task timeout |
 | `AGENT_RELAY_CANCEL_GRACE_MS` | `5000` | Cancellation grace period |
 | `AGENT_RELAY_TERM_GRACE_MS` | `2000` | Grace period before forced termination |
@@ -175,4 +199,4 @@ pnpm test
 pnpm build
 ```
 
-The default suite uses fake ACP agents. Real-agent smoke tests are opt-in; see [`test/AGENTS.md`](test/AGENTS.md).
+The default suite uses fake ACP agents and a fake Codex app-server. Real-agent smoke tests are opt-in; see [`test/AGENTS.md`](test/AGENTS.md).

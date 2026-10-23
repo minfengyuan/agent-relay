@@ -40,7 +40,9 @@ export type RelayErrorCode =
   | "SESSION_CLOSE_FAILED"
   | "PERMISSION_REQUIRED"
   | "UNEXPECTED_PERMISSION"
-  | "ACP_FAILURE";
+  | "ACP_FAILURE"
+  | "CODEX_FAILURE"
+  | "INTERACTION_REQUIRED";
 
 export type RelayError = { code: RelayErrorCode; message: string };
 
@@ -84,13 +86,30 @@ export type DshRelayResult = RelayResultBase & {
   summariesTruncated?: boolean;
 };
 
-export type RelayResult = GrokRelayResult | CursorRelayResult | OpenCodeRelayResult | DshRelayResult;
+export type CodexTokenUsage = {
+  totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteInputTokens?: number | undefined;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+};
+
+export type CodexRelayResult = RelayResultBase & {
+  provider: "codex";
+  toolCalls?: ToolCallSummary[];
+  usage?: { total: CodexTokenUsage; last: CodexTokenUsage; modelContextWindow: number | null };
+  summariesTruncated?: boolean;
+};
+
+export type RelayResult = GrokRelayResult | CursorRelayResult | OpenCodeRelayResult | DshRelayResult | CodexRelayResult;
 
 export type RelayResultPartial =
   | Partial<GrokRelayResult>
   | Partial<CursorRelayResult>
   | Partial<OpenCodeRelayResult>
-  | Partial<DshRelayResult>;
+  | Partial<DshRelayResult>
+  | Partial<CodexRelayResult>;
 
 type GrokForbiddenExtras =
   | "provider"
@@ -125,6 +144,11 @@ export type OpenCodeDelegateInput = DelegateInput & {
 };
 
 export type DshDelegateInput = DelegateInput & {
+  model?: string;
+  reasoningEffort?: string;
+};
+
+export type CodexDelegateInput = DelegateInput & {
   model?: string;
   reasoningEffort?: string;
 };

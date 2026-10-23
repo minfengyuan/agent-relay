@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { cleanupAllChildren } from "../src/runner.js";
+import { cleanupAllChildren, CodexRunner } from "../src/runner.js";
 import { createRelayServer } from "../src/server.js";
 import { RelayFailure } from "../src/types.js";
 import { SessionStore } from "../src/store.js";
-import { clearDelegatedEnv, dshFixture, grokFixture, waitForLog } from "./helpers.js";
+import { clearDelegatedEnv, codexFixture, dshFixture, grokFixture, waitForLog } from "./helpers.js";
 
 const dirs: string[] = [];
 beforeEach(() => {
@@ -66,7 +66,7 @@ describe("MCP server", () => {
     try {
       expect(init).toHaveProperty("result.serverInfo.name", "agent-relay");
       const discovery = await request(2, "tools/list") as { result?: { tools?: unknown[] } };
-      expect(discovery.result?.tools).toHaveLength(4);
+      expect(discovery.result?.tools).toHaveLength(5);
       const response = await request(3, "tools/call", {
         name: "grok_delegate", arguments: { task: "hello", cwd: process.cwd() },
       }) as { result?: { isError?: boolean; content?: Array<{ text?: string }>; structuredContent?: unknown } };
@@ -92,7 +92,7 @@ describe("MCP server", () => {
       } finally { await clientTransport.close(); await server.close(); }
     },
   );
-  it("discovers Grok, Cursor, OpenCode, and DSH delegation with their input contracts", async () => {
+  it("discovers all five providers with their input contracts", async () => {
     const { server, clientTransport, request, init } = await harness();
     expect(init).toHaveProperty("result.serverInfo.name", "agent-relay");
     const response = await request(2, "tools/list");
@@ -114,8 +114,63 @@ describe("MCP server", () => {
     expect(response).not.toHaveProperty("result.tools.3.inputSchema.properties.resume");
     expect(response).toHaveProperty("result.tools.3.outputSchema.properties.provider.const", "dsh");
     expect(response).not.toHaveProperty("result.tools.0.outputSchema.properties.provider");
+    expect(response).toHaveProperty("result.tools.4.name", "codex_delegate");
+    expect(response).toHaveProperty("result.tools.4.inputSchema.required", ["task", "cwd"]);
+    expect(response).toHaveProperty("result.tools.4.inputSchema.properties.model");
+    expect(response).toHaveProperty("result.tools.4.inputSchema.properties.reasoningEffort");
+    expect(response).not.toHaveProperty("result.tools.4.inputSchema.properties.resume");
+    expect(response).toHaveProperty("result.tools.4.outputSchema.properties.provider.const", "codex");
     await clientTransport.close();
     await server.close();
+  });
+
+  it("forwards native Codex options, results, progress, errors, and MCP cancellation", async () => {
+    const cwd = await realpath(await mkdtemp(join(tmpdir(), "relay-server-codex-")));
+    dirs.push(cwd);
+    const { server, clientTransport, request, notify, notifications, stateDir } = await harness({
+      codexCommand: process.execPath, codexCommandArgs: [codexFixture], cancelGraceMs: 100, progressIntervalMs: 1,
+    });
+    const log = join(stateDir, "codex.log");
+    vi.stubEnv("CODEX_FIXTURE_LOG", log);
+    type Response = { result?: { isError?: boolean; content?: Array<{ text: string }>; structuredContent?: Record<string, unknown> } };
+    const call = async (id: number, args: Record<string, unknown>) => {
+      const response = await request(id, "tools/call", { name: "codex_delegate", arguments: { cwd, ...args }, _meta: { progressToken: "codex-progress" } }) as Response;
+      expect(JSON.parse(response.result?.content?.[0]?.text ?? "null")).toEqual(response.result?.structuredContent);
+      return response;
+    };
+    try {
+      const created = await call(3, { task: "early", model: "model-a", reasoningEffort: "high" });
+      expect(created.result?.structuredContent).toMatchObject({ provider: "codex", text: "hello 世界", usage: { total: { totalTokens: 30 } } });
+      expect(notifications).toContainEqual(expect.objectContaining({ method: "notifications/progress", params: expect.objectContaining({ progressToken: "codex-progress" }) }));
+      const sessionId = created.result?.structuredContent?.sessionId;
+      expect((await call(4, { task: "hello", sessionId })).result?.structuredContent).toMatchObject({ sessionId, provider: "codex" });
+      const logEvents = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+      expect(logEvents.find((event) => event.method === "turn/start").params).toMatchObject({ model: "model-a", effort: "high" });
+      for (const [args, code] of [
+        [{ task: "hello", sessionId: "unknown" }, "UNKNOWN_SESSION"],
+        [{ task: "hello", cwd: "relative", sessionId }, "INVALID_CWD"],
+      ] as const) {
+        const result = await call(code === "UNKNOWN_SESSION" ? 5 : 6, args);
+        expect(result.result?.isError).toBe(true);
+        expect(result.result?.structuredContent).toMatchObject({ sessionId: null, provider: "codex", error: { code } });
+      }
+      const rejected = await call(7, { task: "permission", sessionId });
+      expect(rejected.result?.isError).toBe(true);
+      expect(rejected.result?.structuredContent).toMatchObject({ sessionId, provider: "codex", text: "hello ", error: { code: "PERMISSION_REQUIRED" } });
+      // The MCP SDK suppresses replies after client cancellation. Observe the runner
+      // result at its boundary and assert interrupt + lease release instead.
+      const delegate = vi.spyOn(CodexRunner.prototype, "delegate");
+      const pending = call(8, { task: "hang", sessionId });
+      await waitForLog(log, '"prompt":"hang"');
+      await notify("notifications/cancelled", { requestId: 8, reason: "test" });
+      await waitForLog(log, '"method":"turn/interrupt"');
+      await expect(delegate.mock.results[0]?.value).rejects.toMatchObject({ code: "CANCELLED", partial: { sessionId, provider: "codex" } });
+      await cleanupAllChildren();
+      const lease = await new SessionStore(stateDir, "codex").acquire(cwd);
+      await lease.markReaped("no-worker-created"); await lease.release();
+      void pending;
+      delegate.mockRestore();
+    } finally { await clientTransport.close(); await server.close(); }
   });
 
   it("returns matching JSON and structured error output", async () => {

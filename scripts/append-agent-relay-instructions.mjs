@@ -17,12 +17,13 @@ const INSTRUCTIONS = `<!-- AGENT-RELAY_START -->
 
 The calling agent owns planning, delegation, review, and integration. External agents execute bounded tasks in the supplied workspace/worktree.
 
-Delegate only to an agent the user explicitly mentions (Grok, Cursor, OpenCode, or DSH). If the user does not name an agent, the calling agent performs the task itself; do not infer delegation from task type or complexity.
+Delegate only to an agent the user explicitly mentions (Grok, Cursor, OpenCode, DSH, or Codex). If the user does not name an agent, the calling agent performs the task itself; do not infer delegation from task type or complexity.
 
 - Use \`grok_delegate\` for Grok implementation tasks.
 - Use \`cursor_delegate\` for Cursor implementation tasks or focused analysis in \`ask\` mode; an optional \`model\` selects the startup model.
 - Use \`opencode_delegate\` for OpenCode implementation work. Optional \`model\`, \`effort\`, and \`agent\` change the live session configuration; omitted fields keep OpenCode's restored or default state.
 - Use \`dsh_delegate\` for DSH implementation work. Optional \`model\` and \`reasoningEffort\` change the live session configuration; omitted fields keep DSH's restored or default state. Existing sessions resume only when DSH advertises resume; the relay does not load or recreate them.
+- Use \`codex_delegate\` for Codex implementation work through its native app-server. Optional \`model\` and \`reasoningEffort\` change the live thread configuration; omitted fields preserve the restored or default state. Pass the returned \`sessionId\` to resume the same thread.
 
 When delegating:
 
@@ -34,6 +35,7 @@ When delegating:
 - OpenCode auto-selects the request's \`allow_once\` permission option. On PERMISSION_REQUIRED, \`allow_once\` was missing; review the failure and do not treat a retry as extra approval.
 - OpenCode's child \`question: deny\` overlay can be overridden by agent-specific rules. The worker is noninteractive and will time out if it waits for a user; this is not hard isolation.
 - DSH permission requests are refused (\`reject_once\` when offered). On PERMISSION_REQUIRED, review the request and coordinate any policy change before resuming; do not retry to bypass the rejection. The relay refuses automatic approvals; it does not provide hard filesystem or network isolation. Saved DSH sessions and deployment configuration still apply.
+- Codex uses workspace-write sandboxing with sandbox network access disabled and default temporary-directory access. Extra permissions are refused with PERMISSION_REQUIRED; interactive questions fail with INTERACTION_REQUIRED. Do not retry to bypass these failures. Local Codex authentication and inherited MCP configuration still apply.
 - Keep this relay out of downstream agents' MCP configuration to avoid recursive delegation.
 <!-- AGENT-RELAY_END -->`;
 

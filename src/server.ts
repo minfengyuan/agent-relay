@@ -2,10 +2,12 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { RelayConfig } from "./config.js";
 import { SessionStore, resolveCwd } from "./store.js";
-import { CursorRunner, DshRunner, GrokRunner, OpenCodeRunner, type ProgressReporter } from "./runner.js";
+import { CodexRunner, CursorRunner, DshRunner, GrokRunner, OpenCodeRunner, type ProgressReporter } from "./runner.js";
+import { codexUsageSchema } from "./runner/codex-summaries.js";
 import {
   RelayFailure,
   type CursorRelayResult,
+  type CodexRelayResult,
   type DshRelayResult,
   type GrokRelayResult,
   type OpenCodeRelayResult,
@@ -122,6 +124,21 @@ const dshOutputSchema = outputSchema.extend({
   summariesTruncated: z.boolean().optional(),
 });
 
+const codexInputSchema = z.object({
+  task: z.string().trim().min(1).describe("Task for Codex"),
+  cwd: z.string().trim().min(1).describe("Existing absolute working directory"),
+  sessionId: z.string().trim().min(1).optional().describe("Previously returned Codex thread ID"),
+  model: z.string().trim().min(1).optional().describe("Codex model; omitted preserves the default or restored model"),
+  reasoningEffort: z.string().trim().min(1).optional().describe("Codex reasoning effort; omitted preserves the default or restored effort"),
+});
+
+const codexOutputSchema = outputSchema.extend({
+  provider: z.literal("codex"),
+  toolCalls: toolCallSchema.optional(),
+  usage: codexUsageSchema.optional(),
+  summariesTruncated: z.boolean().optional(),
+});
+
 function toolResult(result: RelayResult, isError = false) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(result) }],
@@ -216,6 +233,7 @@ export function createRelayServer(config: RelayConfig): McpServer {
   const cursorRunner = new CursorRunner(config, new SessionStore(config.stateDir, "cursor"));
   const openCodeRunner = new OpenCodeRunner(config, new SessionStore(config.stateDir, "opencode"));
   const dshRunner = new DshRunner(config, new SessionStore(config.stateDir, "dsh"));
+  const codexRunner = new CodexRunner(config, new SessionStore(config.stateDir, "codex"));
 
   registerDelegateTool(server, {
     name: "grok_delegate",
@@ -304,6 +322,30 @@ export function createRelayServer(config: RelayConfig): McpServer {
       return {
         ...errorFields(failure),
         provider: "dsh",
+        ...(extra?.toolCalls ? { toolCalls: extra.toolCalls } : {}),
+        ...(extra?.usage ? { usage: extra.usage } : {}),
+        ...(extra?.summariesTruncated ? { summariesTruncated: true } : {}),
+      };
+    },
+  });
+
+  registerDelegateTool(server, {
+    name: "codex_delegate",
+    title: "Delegate a task to Codex",
+    description: "Runs one native Codex app-server turn with workspace-write sandboxing, sandbox network access disabled, and no automatic approvals; optionally resumes a saved thread.",
+    inputSchema: codexInputSchema,
+    outputSchema: codexOutputSchema,
+    run: (input: z.infer<typeof codexInputSchema>, cwd, signal, progress) => codexRunner.delegate({
+      task: input.task, cwd,
+      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+      ...(input.model === undefined ? {} : { model: input.model }),
+      ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
+    }, signal, progress),
+    toErrorResult: (failure): CodexRelayResult => {
+      const extra = failure.partial && "provider" in failure.partial && failure.partial.provider === "codex"
+        ? failure.partial : undefined;
+      return {
+        ...errorFields(failure), provider: "codex",
         ...(extra?.toolCalls ? { toolCalls: extra.toolCalls } : {}),
         ...(extra?.usage ? { usage: extra.usage } : {}),
         ...(extra?.summariesTruncated ? { summariesTruncated: true } : {}),

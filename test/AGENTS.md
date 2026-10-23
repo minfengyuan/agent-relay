@@ -4,7 +4,7 @@ These instructions apply to `test/**`. Read the root [`AGENTS.md`](../AGENTS.md)
 
 ## Test strategy
 
-The default suite must be hermetic. Most relay behavior is tested by spawning deterministic fake ACP agents from `test/fixtures/`, not by invoking a developer's installed Grok/Cursor/OpenCode CLI.
+The default suite must be hermetic. Relay behavior is tested by spawning deterministic fake ACP agents and a fake Codex app-server from `test/fixtures/`, not by invoking a developer's installed CLI.
 
 Real-agent smoke tests are separate and opt-in because they depend on local executables, authentication, provider versions, network/service availability, and provider-side behavior.
 
@@ -36,6 +36,7 @@ pnpm test:real
 pnpm test:real:cursor
 pnpm test:real:opencode
 pnpm test:real:dsh
+pnpm test:real:codex
 ```
 
 Run these only when the corresponding CLI is installed/authenticated and the change needs verification against a real implementation. A missing real-provider environment is not a reason to weaken or skip hermetic coverage.
@@ -51,6 +52,8 @@ Use the narrowest test file that owns the behavior:
 - `cursor-runner.test.ts` — Cursor adapter behavior.
 - `opencode-runner.test.ts` — OpenCode adapter behavior.
 - `dsh-runner.test.ts` — DSH adapter behavior.
+- `codex-runner.test.ts` — native Codex protocol, session, permission, and lifecycle behavior.
+- `codex-shutdown.test.ts` — shared shutdown across Codex and ACP workers.
 - `process-lifecycle.test.ts` — cancellation, timeouts, child/process cleanup, and shutdown-sensitive cases.
 - `server.test.ts` — MCP tool schemas/wiring and structured results/errors.
 - `append-agent-relay-instructions.test.ts` — setup-script transformations.
