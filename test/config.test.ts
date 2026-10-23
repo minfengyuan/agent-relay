@@ -7,6 +7,12 @@ import { OpenCodeSummaries, StandardSummaries } from "../src/runner/summaries.js
 import type * as acp from "@agentclientprotocol/sdk";
 
 describe("loadConfig", () => {
+  it("defaults to native codex and trims its executable override", () => {
+    expect(loadConfig({}).codexCommand).toBe("codex");
+    expect(loadConfig({}).codexCommandArgs).toBeUndefined();
+    expect(loadConfig({ AGENT_RELAY_CODEX_COMMAND: " /bin/codex " }).codexCommand).toBe("/bin/codex");
+    expect(loadConfig({ AGENT_RELAY_CODEX_COMMAND: " " }).codexCommand).toBe("codex");
+  });
   it("defaults to opencode and trims an explicit command", () => {
     expect(loadConfig({}).opencodeCommand).toBe("opencode");
     expect(loadConfig({ AGENT_RELAY_OPENCODE_COMMAND: "  /bin/oc  " }).opencodeCommand).toBe("/bin/oc");

@@ -62,6 +62,8 @@ describe("append-agent-relay-instructions", () => {
     expect(first).toContain("`cursor_delegate`");
     expect(first).toContain("`opencode_delegate`");
     expect(first).toContain("`dsh_delegate`");
+    expect(first).toContain("`codex_delegate`");
+    expect(first).toContain("INTERACTION_REQUIRED");
     expect(first).toContain("PERMISSION_REQUIRED");
     expect(first).toContain("allow_once");
     expect(first).toContain(startMarker);
@@ -173,7 +175,7 @@ describe("append-agent-relay-instructions", () => {
     const content = await readFile(join(root, ".agents", "AGENTS.md"), "utf8");
     expect(content).toContain(startMarker);
     expect(content).toContain("the calling agent performs the task itself");
-    expect(content).not.toContain("Codex");
+    expect(content).not.toContain("Codex owns planning");
     await expect(readFile(join(oldHome, "AGENTS.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 

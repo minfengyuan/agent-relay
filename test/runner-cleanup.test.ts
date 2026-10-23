@@ -72,6 +72,17 @@ afterEach(async () => {
 });
 
 describe("AcpRunner cleanup failure", () => {
+  it.each(["unconfirmed", "throw"] as const)("retains the Codex lease and partial output when cleanup is %s", async (mode) => {
+    state.report = mode;
+    const { CodexRunner } = await import("../src/runner.js");
+    const { SessionStore } = await import("../src/store.js");
+    const { baseConfig, tempDir } = await import("./helpers.js");
+    const stateDir = await tempDir(dirs), cwd = await tempDir(dirs);
+    await expect(new CodexRunner(baseConfig(stateDir), new SessionStore(stateDir, "codex")).delegate({ task: "hello", cwd }))
+      .rejects.toMatchObject({ code: "PROCESS_CLEANUP_FAILED", partial: { provider: "codex", text: "hello 世界", sessionId: expect.any(String) } });
+    expect(state.actualCalls).toBe(1);
+    await expect(new SessionStore(stateDir).acquire(cwd)).rejects.toMatchObject({ code: "WORKSPACE_BUSY" });
+  });
   it.each(["unconfirmed", "throw"] as const)("retains partial output and the cwd lock when cleanup returns %s", async (mode) => {
     state.report = mode;
     const { GrokRunner } = await import("../src/runner.js");

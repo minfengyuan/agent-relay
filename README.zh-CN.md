@@ -2,9 +2,9 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-通过一个本地 MCP Server，让任何支持 stdio 的 MCP 客户端调用 **Grok**、**Cursor**、**OpenCode** 和 **DSH**。
+通过一个本地 MCP Server，让任何支持 stdio 的 MCP 客户端调用 **Grok**、**Cursor**、**OpenCode**、**DSH** 和 **Codex**。
 
-`agent-relay` 将 MCP 工具调用桥接到本地支持 ACP 的 Coding Agent。调用方负责统一编排和结果审查；relay 执行一轮非交互任务，返回有大小限制的输出和可继续使用的会话 ID。
+`agent-relay` 将 MCP 工具调用桥接到本地 Coding Agent，使用 ACP 或 Codex 原生 app-server 协议。调用方负责统一编排和结果审查；relay 执行一轮非交互任务，返回有大小限制的输出和可继续使用的会话 ID。
 
 ## 为什么使用它？
 
@@ -22,6 +22,7 @@
 | Cursor | `cursor_delegate` | Agent 模式或 ask 模式编码任务 |
 | OpenCode | `opencode_delegate` | 支持可选 model、effort、agent 的编码任务 |
 | DSH | `dsh_delegate` | 通过 DeepSeek Harness 执行编码任务 |
+| Codex | `codex_delegate` | 通过 Codex 原生 app-server 执行编码任务 |
 
 ## 快速开始
 
@@ -67,7 +68,7 @@ node /ABSOLUTE/PATH/agent-relay/dist/cli.js
 }
 ```
 
-Cursor 需要显式配置可执行文件路径。Grok、OpenCode 和 DSH 默认使用 PATH 中的 `grok`、`opencode` 和 `dsh`。只需安装并认证实际要调用的 Agent。
+Cursor 需要显式配置可执行文件路径。Grok、OpenCode、DSH 和 Codex 默认使用 PATH 中的 `grok`、`opencode`、`dsh` 和 `codex`。只需安装并认证实际要调用的 Agent。
 
 relay 使用 stdio，stdout 专用于 MCP 消息。任务默认总超时为一小时；如果客户端支持设置工具调用超时，建议至少设为 3660 秒，并始终高于自定义的 relay 总超时。客户端超时和进度设置方式以各客户端为准。
 
@@ -106,16 +107,18 @@ pnpm setup:instructions
 将 /path/to/worktree 中的这个实现任务交给 OpenCode。
 
 将 /path/to/worktree 中的这个实现任务交给 DSH。
+
+将 /path/to/worktree 中的这个实现任务交给 Codex。
 ```
 
-每个工具都需要 `task` 和绝对路径 `cwd`。将返回的 `sessionId` 连同相同工作目录传给同一个工具，即可继续对应 Agent 的会话。各 provider 的可选参数可通过 MCP 工具发现获取；本次更名保留四个工具的名称和输入输出契约。
+每个工具都需要 `task` 和绝对路径 `cwd`。将返回的 `sessionId` 连同相同工作目录传给同一个工具，即可继续对应 Agent 的会话。各 provider 的可选参数可通过 MCP 工具发现获取；原有四个 ACP 工具保留契约，并新增 `codex_delegate`。
 
 ```text
 调用方选择任务和 worktree
         ↓
 agent-relay 执行一轮 Agent 任务
         ↓
-Grok / Cursor / OpenCode / DSH 在本地工作
+Grok / Cursor / OpenCode / DSH / Codex 在本地工作
         ↓
 调用方审查结果、diff 和测试
         ↓
@@ -123,6 +126,26 @@ Grok / Cursor / OpenCode / DSH 在本地工作
 ```
 
 并行处理独立任务时使用不同 worktree。同一个解析后的工作目录只允许一个活跃任务；重叠调用返回 `WORKSPACE_BUSY`。
+
+### Codex
+
+调用 `codex_delegate` 前先安装 Codex CLI 并完成认证，无需安装 ACP 桥接包。relay 直接启动 `codex app-server --listen stdio://`，沿用 CLI 已有认证，不发起登录。协议兼容基线为 Codex CLI 0.163.0，旧版未经验证。Windows 请将 `AGENT_RELAY_CODEX_COMMAND` 指向原生 `codex.exe`，不支持 `.cmd`/`.bat` 启动器。
+
+输入包括 `task`、绝对路径 `cwd`，以及可选的 `sessionId`、`model`、`reasoningEffort`。返回的 `sessionId` 是 Codex 的 `thread.id`；只能在原目录恢复 relay 已记录的 ID。线程恢复失败时不会创建替代线程。显式 model/effort 修改当前线程配置，省略则保留恢复值或默认值；无效配置由 Codex 校验，返回 `CODEX_FAILURE`。
+
+```json
+{
+  "task": "实现指定改动并运行相关检查。",
+  "cwd": "/absolute/path/to/worktree",
+  "reasoningEffort": "high"
+}
+```
+
+新建与恢复后的每一轮均采用 workspace-write 沙箱，禁用沙箱内网络访问，保留默认临时目录权限，并将审批路由给客户端。额外审批会被拒绝并返回 `PERMISSION_REQUIRED`；提问或 elicitation 返回 `INTERACTION_REQUIRED`。本机 Codex/MCP 配置仍然生效；这不隔离外部 MCP 服务或模型 API 流量。请勿在工作 Agent 的 MCP 配置中加载本 relay。
+
+结果包含 `provider: "codex"`、`sessionId`、`stopReason`、`text`、`truncated`，以及可选的有界 `toolCalls`、`summariesTruncated` 和原生 token `usage`（`total`、`last`、`modelContextWindow`）。只有轮次完成才算成功。失败保留已确认的会话 ID 和部分输出；取消或超时会中断轮次并清理进程树。协议不兼容返回 `PROTOCOL_MISMATCH`，其他原生失败使用 `CODEX_FAILURE`。
+
+真实 smoke 需显式运行 `pnpm test:real:codex`，或 `RUN_CODEX_REAL_TESTS=1 pnpm exec vitest run test/codex-real-smoke.test.ts`。测试使用临时状态和工作目录，但会使用真实 Codex 账户和服务。
 
 ## 配置
 
@@ -134,8 +157,9 @@ Grok / Cursor / OpenCode / DSH 在本地工作
 | `AGENT_RELAY_CURSOR_COMMAND` | 调用 Cursor 时必填 | Cursor 可执行文件 |
 | `AGENT_RELAY_OPENCODE_COMMAND` | `opencode` | OpenCode 可执行文件 |
 | `AGENT_RELAY_DSH_COMMAND` | `dsh` | DSH 可执行文件 |
+| `AGENT_RELAY_CODEX_COMMAND` | `codex` | Codex 原生可执行文件 |
 | `AGENT_RELAY_STATE_DIR` | `~/.local/agent-relay` | 会话元数据及工作目录锁 |
-| `AGENT_RELAY_PHASE_TIMEOUT_MS` | `30000` | ACP 阶段超时 |
+| `AGENT_RELAY_PHASE_TIMEOUT_MS` | `30000` | 协议阶段超时 |
 | `AGENT_RELAY_TOTAL_TIMEOUT_MS` | `3600000` | 任务总超时 |
 | `AGENT_RELAY_CANCEL_GRACE_MS` | `5000` | 取消宽限时间 |
 | `AGENT_RELAY_TERM_GRACE_MS` | `2000` | 强制终止前的宽限时间 |

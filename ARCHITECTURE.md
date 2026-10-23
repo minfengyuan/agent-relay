@@ -4,7 +4,7 @@ This document explains the durable component boundaries and runtime invariants o
 
 ## System context
 
-The relay sits between **MCP clients** and locally installed **ACP coding-agent CLIs**:
+The relay sits between **MCP clients** and locally installed **coding-agent CLIs** using ACP or the native Codex app-server protocol:
 
 ```text
 MCP client
@@ -15,13 +15,13 @@ src/cli.ts → src/cli-runtime.ts
 src/server.ts
   │ validated delegate request
   ▼
-AcpRunner ───────── SessionStore
+AcpRunner / CodexRunner ── SessionStore
   │                    │
-  │ ACP over child     ├─ session metadata
+  │ ACP or native      ├─ session metadata
   │ stdin/stdout       └─ per-cwd locks
   ▼
 Provider CLI
-(Grok / Cursor / OpenCode / DSH)
+(Grok / Cursor / OpenCode / DSH / Codex)
 ```
 
 The relay is an orchestration boundary, not a second autonomous planner. The calling client chooses what to delegate and reviews/integrates the result; the relay executes one non-interactive provider turn and returns a resumable session ID plus bounded output.
@@ -45,7 +45,7 @@ Do not move provider behavior here.
 Responsibilities:
 
 - Define Zod schemas for MCP tool inputs and structured outputs.
-- Register `grok_delegate`, `cursor_delegate`, `opencode_delegate`, and `dsh_delegate`.
+- Register `grok_delegate`, `cursor_delegate`, `opencode_delegate`, `dsh_delegate`, and `codex_delegate`.
 - Resolve and validate `cwd` before execution.
 - Convert runner results and `RelayFailure`s into MCP tool results.
 - Forward MCP cancellation and progress notifications into the runner.
@@ -74,6 +74,16 @@ A public tool-contract change normally begins here and must stay synchronized wi
 16. Terminate the worker process tree and release the workspace lock only after cleanup is confirmed.
 
 Provider-name branches should not be added here when the `ProviderAdapter` contract can express the difference.
+
+### Native Codex and shared lifecycle
+
+`src/runner/codex-runner.ts` uses `codex app-server --listen stdio://` directly. Its JSONL client in `codex-client.ts` correlates requests and handles server-initiated requests without ACP translation. Frames and early-event buffers are limited to 8 MiB; early events are additionally limited to 1024 entries. Unknown requests fail deterministically; unknown notifications are ignored.
+
+After `initialize`/`initialized`, Codex checks `account/read` without initiating login, creates or resumes a persistent thread, then runs one turn. The relay's `sessionId` stores `thread.id`, not `thread.sessionId`. Only relay-confirmed IDs are exposed, and Codex has its own session namespace while sharing all workspace locks. New records are persisted before starting the turn; recovery never substitutes a new thread. Explicit model/effort overrides apply to the live thread; omitted values preserve Codex's state.
+
+Every turn explicitly applies workspace-write sandboxing with sandbox network access disabled, default temporary-directory access, on-request approvals routed to the user, and no automatic approval. Approval requests are declined and fail with `PERMISSION_REQUIRED`; questions/elicitation fail with `INTERACTION_REQUIRED`. Local Codex authentication and MCP configuration still apply. Text and tool summaries are bounded, agent-message completion is deduplicated against deltas, and native token usage retains `total`, `last`, and `modelContextWindow` rather than ACP usage semantics. Only `turn/completed` with status `completed` succeeds.
+
+Both runners register with `src/runner/lifecycle.ts` before acquiring a lease. This module owns the synchronous admission gate, active-task registry, shutdown promise, and cleanup diagnostic aggregation. Existing runner exports remain compatible. Codex cancellation first attempts `turn/interrupt` within bounded grace, then uses the existing process-tree controller and lease protocol; unconfirmed cleanup retains the lock and takes precedence over task errors.
 
 ### `src/runner/*`: shared execution primitives
 
@@ -155,7 +165,7 @@ structured MCP result
 
 ## Session semantics
 
-The relay persists only the metadata needed to safely reconnect an MCP client to a provider-owned ACP session. The provider remains the source of truth for conversation state.
+The relay persists only the metadata needed to safely reconnect an MCP client to a provider-owned session/thread. The provider remains the source of truth for conversation state.
 
 Important consequences:
 
