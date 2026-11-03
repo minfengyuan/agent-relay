@@ -36,10 +36,10 @@ function opencodeAdapter(config: RelayConfig): ProviderAdapter<OpenCodeDelegateI
   return {
     provider: "opencode",
     displayName: "OpenCode",
-    command(input) {
+    command() {
       return {
         command: config.opencodeCommand?.trim() || "opencode",
-        args: [...(config.opencodeCommandArgs ?? []), "acp", "--cwd", input.cwd],
+        args: [...(config.opencodeCommandArgs ?? []), "acp"],
       };
     },
     authenticate(initialized) {

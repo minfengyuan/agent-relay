@@ -4,11 +4,16 @@ import { appendFileSync } from "node:fs";
 import { Readable, Writable } from "node:stream";
 
 const mode = process.env.FAKE_ACP_MODE ?? "normal";
+const version = process.env.FAKE_OPENCODE_VERSION ?? "2";
 const sessionId = process.env.FAKE_SESSION_ID ?? "fake-session-1";
-const cwdArgIndex = process.argv.indexOf("--cwd");
 const log = (line) => {
   if (process.env.FAKE_ACP_LOG) appendFileSync(process.env.FAKE_ACP_LOG, `${line}\n`);
 };
+
+if (version === "2" && process.argv.includes("--cwd")) {
+  process.stderr.write("Unrecognized flag: --cwd in command opencode acp\n");
+  process.exit(1);
+}
 
 if (mode === "malformed") {
   process.stdout.write("{definitely-not-json}\n");
@@ -30,8 +35,12 @@ if (mode === "malformed") {
         protocolVersion: 1,
         agentCapabilities: {
           loadSession,
-          ...(resume ? { sessionCapabilities: { resume: {} } } : { sessionCapabilities: {} }),
+          sessionCapabilities: {
+            ...(resume ? { resume: {} } : {}),
+            ...(version === "2" ? { close: {}, delete: {}, fork: {}, list: {} } : {}),
+          },
         },
+        agentInfo: { name: "OpenCode", version: version === "2" ? "2.0.12" : "1.18.35" },
         authMethods: mode === "no-auth" ? [] : mode === "unknown-auth" ? [
           { id: "other-login", name: "Other login" },
         ] : [
@@ -45,7 +54,6 @@ if (mode === "malformed") {
     })
     .onRequest(acp.methods.agent.session.new, (ctx) => {
       log(`new:${ctx.params.cwd}:${process.cwd()}:${ctx.params.mcpServers.length}`);
-      log(`cwd-arg:${cwdArgIndex >= 0 ? process.argv[cwdArgIndex + 1] : ""}`);
       return { sessionId, configOptions };
     })
     .onRequest(acp.methods.agent.session.resume, async (ctx) => {
@@ -86,12 +94,22 @@ if (mode === "malformed") {
           effort.options = [{ value: "low", name: "Low" }];
         }
       }
+      if (ctx.params.configId === "model" && ctx.params.value === "opencode/no-variants") {
+        configOptions = configOptions.filter((entry) => entry.id !== "effort");
+      }
+      if (ctx.params.configId === "model" && ctx.params.value === "opencode/variants"
+        && !configOptions.some((entry) => entry.id === "effort")) {
+        configOptions.push({
+          id: "effort", name: "Effort", type: "select", currentValue: "default",
+          options: [{ value: "default", name: "Default" }, { value: "high", name: "High" }],
+        });
+      }
       return { configOptions };
     })
     .onRequest(acp.methods.agent.session.prompt, async (ctx) => {
       log(`prompt:${ctx.params.sessionId}`);
       log(`prompt-text:${ctx.params.prompt[0]?.text ?? ""}`);
-      if (mode === "descendant") {
+      if (mode === "descendant" || mode === "private-server" || mode === "private-server-hang" || mode === "private-server-fail") {
         const descendant = spawn(process.execPath, ["-e", "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"], {
           stdio: "ignore",
         });
@@ -133,7 +151,7 @@ if (mode === "malformed") {
         });
         log(`permission-other-response:${JSON.stringify(outcome)}`);
       }
-      if (mode === "hang" || mode === "permission-after-cancel") {
+      if (mode === "hang" || mode === "permission-after-cancel" || mode === "private-server-hang") {
         while (!cancelled) await new Promise((resolve) => setTimeout(resolve, 10));
         return { stopReason: "cancelled" };
       }
@@ -192,7 +210,7 @@ if (mode === "malformed") {
           content: { type: "text", text: mode === "large" ? "x".repeat(10000) : mode === "partial-fail" ? "partial text" : "fresh answer" },
         },
       });
-      if (mode === "partial-fail") throw new Error("prompt failed after output");
+      if (mode === "partial-fail" || mode === "private-server-fail") throw new Error("prompt failed after output");
       return { stopReason: "end_turn" };
     })
     .onNotification(acp.methods.agent.session.cancel, async (ctx) => {
@@ -221,6 +239,8 @@ function defaultConfigOptions(grouped) {
   const models = [
     { value: "opencode/gpt", name: "GPT" },
     { value: "opencode/fast", name: "Fast" },
+    { value: "opencode/no-variants", name: "No variants" },
+    { value: "opencode/variants", name: "Variants" },
   ];
   return [
     {
@@ -241,6 +261,7 @@ function defaultConfigOptions(grouped) {
         { value: "low", name: "Low" },
         { value: "medium", name: "Medium" },
         { value: "high", name: "High" },
+        ...(version === "2" ? [{ value: "default", name: "Default" }] : []),
       ],
     }]),
     {

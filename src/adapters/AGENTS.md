@@ -73,8 +73,9 @@ When changing an existing adapter, walk through the contract in this order:
 
 ### OpenCode
 
-- Command defaults to `opencode` and launches its ACP mode with the requested `cwd`.
-- Preserve any existing `OPENCODE_PERMISSION` object while forcing `question: "deny"`.
+- Command defaults to `opencode` and launches `acp` without `--cwd`, which V2 rejects. The child working directory and ACP new/load/resume requests carry the requested `cwd`; this also supports V1.
+- Preserve any existing `OPENCODE_PERMISSION` object while forcing `question: "deny"` for V1 compatibility. Do not translate it into V2 permission rules.
+- Do not advertise terminal authentication or question/elicitation capabilities. V2 ACP cancels questions that cannot be shown; keep real question-tool coverage separate from fake-agent assertions.
 - `resume` without `sessionId` is invalid.
 - Existing sessions prefer ACP resume when available, then load; `resume: false` explicitly requires load support.
 - `model`, `effort`, and `agent` map to advertised session config options and must be validated against available values before setting.

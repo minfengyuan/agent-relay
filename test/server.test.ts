@@ -8,7 +8,7 @@ import { cleanupAllChildren, CodexRunner } from "../src/runner.js";
 import { createRelayServer } from "../src/server.js";
 import { RelayFailure } from "../src/types.js";
 import { SessionStore } from "../src/store.js";
-import { clearDelegatedEnv, codexFixture, dshFixture, grokFixture, waitForLog } from "./helpers.js";
+import { clearDelegatedEnv, codexFixture, dshFixture, grokFixture, opencodeFixture, waitForLog } from "./helpers.js";
 
 const dirs: string[] = [];
 beforeEach(() => {
@@ -262,6 +262,42 @@ describe("MCP server", () => {
     });
     await clientTransport.close();
     await server.close();
+  });
+
+  it("runs the V2 OpenCode profile through MCP with unchanged results and option forwarding", async () => {
+    const cwd = await realpath(await mkdtemp(join(tmpdir(), "relay-server-opencode-")));
+    dirs.push(cwd);
+    const { server, clientTransport, request, stateDir } = await harness({
+      opencodeCommand: process.execPath,
+      opencodeCommandArgs: [opencodeFixture],
+    });
+    const log = join(stateDir, "opencode.log");
+    vi.stubEnv("FAKE_ACP_LOG", log);
+    vi.stubEnv("FAKE_OPENCODE_VERSION", "2");
+    try {
+      const response = await request(3, "tools/call", {
+        name: "opencode_delegate",
+        arguments: { task: "hello", cwd, model: "opencode/gpt", effort: "default", agent: "build" },
+      }) as { result?: { isError?: boolean; content?: { text?: string }[]; structuredContent?: unknown } };
+      expect(response.result?.isError).not.toBe(true);
+      expect(response.result?.structuredContent).toMatchObject({
+        provider: "opencode",
+        sessionId: "fake-session-1",
+        text: "fresh answer",
+        stopReason: "end_turn",
+        usage: { used: 42, size: 128 },
+      });
+      expect(JSON.parse(response.result?.content?.[0]?.text ?? "null")).toEqual(response.result?.structuredContent);
+      const events = await readFile(log, "utf8");
+      expect(events).not.toContain("--cwd");
+      expect(events).toContain(`new:${cwd}:${cwd}:0`);
+      expect(events).toContain("set-config:model:opencode/gpt");
+      expect(events).toContain("set-config:effort:default");
+      expect(events).toContain("set-config:mode:build");
+    } finally {
+      await clientTransport.close();
+      await server.close();
+    }
   });
 
   it("returns a structured OpenCode resume input error without spawning", async () => {

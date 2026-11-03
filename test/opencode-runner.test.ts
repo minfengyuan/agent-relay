@@ -1,9 +1,10 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { OpenCodeRunner } from "../src/runner.js";
 import { SessionStore } from "../src/store.js";
-import { baseConfig as config, tempDir as makeTempDir, useRunnerCleanup, waitForLog } from "./helpers.js";
+import { baseConfig as config, opencodeFixture, tempDir as makeTempDir, useRunnerCleanup, waitForLog } from "./helpers.js";
 
 const dirs: string[] = [];
 vi.setConfig({ testTimeout: 15_000 });
@@ -11,9 +12,11 @@ useRunnerCleanup(dirs);
 const tempDir = () => makeTempDir(dirs);
 
 describe("OpenCodeRunner", () => {
-  it("starts OpenCode ACP with matching cwd, overlay env, and skipped client fs/terminal capabilities", async () => {
+  it.each(["1", "2"])("starts OpenCode V%s ACP with matching cwd and noninteractive capabilities", async (version) => {
+    vi.stubEnv("FAKE_OPENCODE_VERSION", version);
     const state = await tempDir();
-    const cwd = await tempDir();
+    const cwd = join(await tempDir(), "工作目录 with spaces");
+    await mkdir(cwd);
     const log = join(state, "start.log");
     vi.stubEnv("FAKE_ACP_LOG", log);
     vi.stubEnv("OPENCODE_PERMISSION", JSON.stringify({ bash: "allow" }));
@@ -33,9 +36,10 @@ describe("OpenCodeRunner", () => {
     expect(first.text).not.toContain("OTHER SESSION");
     expect(first.toolCalls?.some((call) => call.toolCallId === "other-tool")).toBe(false);
     const events = await readFile(log, "utf8");
-    expect(events).toContain(JSON.stringify(["acp", "--cwd", cwd]).slice(1, -1));
+    expect(events).toContain(',"acp"]');
+    expect(events).not.toContain("--cwd");
     expect(events).toContain(`process-cwd:${cwd}`);
-    expect(events).toContain(`cwd-arg:${cwd}`);
+    expect(events).toContain(`new:${cwd}:${cwd}:0`);
     expect(events).toContain("delegated:1");
     expect(events).toContain("auth:opencode-login");
     expect(events).toContain("new:");
@@ -44,6 +48,8 @@ describe("OpenCodeRunner", () => {
     expect(events).not.toContain("set-config:");
     expect(events).not.toContain('"readTextFile":true');
     expect(events).not.toContain('"terminal":true');
+    expect(events).not.toContain('"elicitation"');
+    expect(events).not.toContain('"terminal-auth"');
   });
 
   it("rejects resume without sessionId before spawning", async () => {
@@ -64,7 +70,8 @@ describe("OpenCodeRunner", () => {
     await expect(readFile(log, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("resumes by default, loads when forced, and filters load replay", async () => {
+  it.each(["1", "2"])("resumes V%s by default, loads when forced, and filters load replay", async (version) => {
+    vi.stubEnv("FAKE_OPENCODE_VERSION", version);
     const state = await tempDir();
     const cwd = await tempDir();
     const log = join(state, "restore.log");
@@ -240,6 +247,100 @@ describe("OpenCodeRunner", () => {
     expect(events).not.toContain("set-config:effort:high");
     expect(events).toContain("set-config:model:opencode/fast");
     expect(events).toContain("set-config:model:opencode/gpt");
+  });
+
+  it("uses the updated effort options when switching models", async () => {
+    const state = await tempDir();
+    const cwd = await tempDir();
+    const log = join(state, "variants.log");
+    vi.stubEnv("FAKE_ACP_LOG", log);
+    vi.stubEnv("FAKE_ACP_MODE", "no-effort");
+    await new OpenCodeRunner(config(state), new SessionStore(state, "opencode")).delegate({
+      task: "variants",
+      cwd,
+      model: "opencode/variants",
+      effort: "default",
+    });
+    expect(await readFile(log, "utf8")).toContain("set-config:effort:default");
+
+    vi.stubEnv("FAKE_ACP_MODE", "normal");
+    vi.stubEnv("FAKE_SESSION_ID", "without-variants");
+    await expect(new OpenCodeRunner(config(state), new SessionStore(state, "opencode")).delegate({
+      task: "no variants",
+      cwd,
+      model: "opencode/no-variants",
+      effort: "high",
+    })).rejects.toMatchObject({ code: "CONFIG_UNSUPPORTED" });
+    expect(await readFile(log, "utf8")).not.toContain("prompt:without-variants");
+  });
+
+  it("rejects default effort when the provider does not advertise it", async () => {
+    vi.stubEnv("FAKE_OPENCODE_VERSION", "1");
+    const state = await tempDir();
+    await expect(new OpenCodeRunner(config(state), new SessionStore(state, "opencode")).delegate({
+      task: "default",
+      cwd: await tempDir(),
+      effort: "default",
+    })).rejects.toMatchObject({ code: "INVALID_CONFIG" });
+  });
+
+  it("records real-smoke protocol evidence without recording task or tool input", async () => {
+    const state = await tempDir();
+    const cwd = await tempDir();
+    const log = join(state, "proxy.jsonl");
+    vi.stubEnv("OPENCODE_RELAY_SMOKE_LOG", log);
+    vi.stubEnv("FAKE_ACP_MODE", "permission");
+    const proxy = fileURLToPath(new URL("./fixtures/opencode-smoke-proxy.mjs", import.meta.url));
+    const result = await new OpenCodeRunner(config(state, {
+      opencodeCommandArgs: [proxy, process.execPath, opencodeFixture],
+    }), new SessionStore(state, "opencode")).delegate({ task: "private-task-content", cwd });
+    expect(result.text).toBe("fresh answer");
+    const recorded = await readFile(log, "utf8");
+    const entries = recorded.trim().split("\n").map((line) => JSON.parse(line));
+    expect(entries).toContainEqual(expect.objectContaining({ method: "session/request_permission" }));
+    expect(entries).toContainEqual(expect.objectContaining({
+      direction: "client",
+      outcome: { outcome: "selected", optionId: "allow-once-actual" },
+    }));
+    expect(recorded).not.toContain("private-task-content");
+    expect(recorded).not.toContain("allowed.txt");
+    for (const pid of entries.flatMap((entry) => entry.pids ?? [])) {
+      expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+    }
+  });
+
+  it.each(["success", "failure", "cancel", "timeout"])("cleans up the V2 private server after %s", async (outcome) => {
+    const state = await tempDir();
+    const cwd = await tempDir();
+    const log = join(state, "private-server.log");
+    vi.stubEnv("FAKE_ACP_LOG", log);
+    const modes: Record<string, string> = {
+      success: "private-server",
+      failure: "private-server-fail",
+      cancel: "private-server-hang",
+      timeout: "private-server-hang",
+    };
+    vi.stubEnv("FAKE_ACP_MODE", modes[outcome]);
+    const store = new SessionStore(state, "opencode");
+    const controller = new AbortController();
+    const pending = new OpenCodeRunner(config(state, {
+      totalTimeoutMs: outcome === "timeout" ? 1_500 : 15_000,
+    }), store).delegate({ task: "private server", cwd }, controller.signal);
+    const settled = pending.then((result) => result, (error: unknown) => error);
+    await waitForLog(log, "descendant:");
+    if (outcome === "cancel") controller.abort();
+    if (outcome === "success") {
+      expect(await settled).toMatchObject({ stopReason: "end_turn" });
+    } else {
+      const codes: Record<string, string> = { failure: "ACP_FAILURE", cancel: "CANCELLED", timeout: "TIMEOUT" };
+      expect(await settled).toMatchObject({ code: codes[outcome] });
+    }
+    const match = /descendant:(\d+)/.exec(await readFile(log, "utf8"));
+    expect(match).not.toBeNull();
+    expect(() => process.kill(Number(match?.[1]), 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+    const lease = await store.acquire(cwd);
+    await lease.markReaped("no-worker-created");
+    await lease.release();
   });
 
   it("selects the actual allow_once option id and continues", async () => {
