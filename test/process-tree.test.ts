@@ -133,4 +133,17 @@ describe("process-tree controller", () => {
     expect(report).toEqual({ forced: true, confirmed: true });
     await waitForExit(child);
   });
+
+  it.runIf(process.platform !== "win32")("confirms a POSIX worker that exits as its stdout closes", async () => {
+    const child = startNode("process.stdout.write('ready\\n', () => process.exit(19))", true);
+    const controller = createProcessTreeController(child, { termGraceMs: 20, killConfirmMs: 2_000 });
+    const terminated = new Promise<Awaited<ReturnType<typeof controller.terminate>>>((resolve, reject) => {
+      child.stdout.once("end", () => { void controller.terminate().then(resolve, reject); });
+      child.once("error", reject);
+    });
+    child.stdout.resume();
+    await expect(terminated).resolves.toEqual({ forced: false, confirmed: true });
+    await waitForExit(child);
+    expect(child.exitCode).toBe(19);
+  });
 });

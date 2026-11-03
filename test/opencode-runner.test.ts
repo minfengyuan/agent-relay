@@ -564,6 +564,10 @@ describe("OpenCodeRunner", () => {
       .rejects.toMatchObject({ code: process.platform === "win32" ? "PROCESS_CLEANUP_FAILED" : "ACP_FAILURE" });
     if (process.platform === "win32") {
       await expect(new SessionStore(state).acquire(cwd)).rejects.toMatchObject({ code: "WORKSPACE_BUSY" });
+    } else {
+      const lease = await new SessionStore(state).acquire(cwd);
+      await lease.markReaped("no-worker-created");
+      await lease.release();
     }
   });
 });

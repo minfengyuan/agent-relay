@@ -294,6 +294,11 @@ describe("GrokRunner", () => {
     const cwd = await tempDir();
     await expect(new GrokRunner(config(state), new SessionStore(state)).delegate({ task: mode, cwd }))
       .rejects.toMatchObject({ code: process.platform === "win32" ? "PROCESS_CLEANUP_FAILED" : "ACP_FAILURE" });
+    if (process.platform !== "win32") {
+      const lease = await new SessionStore(state).acquire(cwd);
+      await lease.markReaped("no-worker-created");
+      await lease.release();
+    }
   });
 
   it("stops a writing descendant before releasing a successful task lock", async () => {
