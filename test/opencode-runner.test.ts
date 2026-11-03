@@ -370,7 +370,7 @@ describe("OpenCodeRunner", () => {
     const cwd = await tempDir();
     const log = join(state, "missing.log");
     vi.stubEnv("FAKE_ACP_LOG", log);
-    await expect(new OpenCodeRunner(config(state), new SessionStore(state, "opencode")).delegate({
+    await expect(new OpenCodeRunner(config(state, { cancelGraceMs: 1_000 }), new SessionStore(state, "opencode")).delegate({
       task: "permission",
       cwd,
     })).rejects.toMatchObject({
