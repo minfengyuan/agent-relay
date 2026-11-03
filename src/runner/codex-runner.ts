@@ -191,7 +191,7 @@ export class CodexRunner {
       await lease.bindWorker(reference);
       const request = (method: string, params: CodexMessage, code: RelayErrorCode): Promise<CodexMessage> => {
         if (abort.signal.aborted) return Promise.reject(abort.signal.reason);
-        return run(withTimeout(client!.request(method, params), this.config.phaseTimeoutMs, code, `Codex ${method} timed out`));
+        return withTimeout(run(client!.request(method, params)), this.config.phaseTimeoutMs, code, `Codex ${method} timed out`);
       };
       await request("initialize", {
         clientInfo: { name: "agent-relay", title: "Agent Relay", version: "0.1.0" },
