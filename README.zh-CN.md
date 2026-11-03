@@ -154,6 +154,35 @@ Grok / Cursor / OpenCode / DSH / Codex 在本地工作
 
 并行处理独立任务时使用不同 worktree。同一个解析后的工作目录只允许一个活跃任务；重叠调用返回 `WORKSPACE_BUSY`。
 
+### OpenCode
+
+Relay 对 V1、V2 均使用 `opencode acp`，通过子进程工作目录和 ACP 会话请求传递绝对路径 `cwd`，不传递 V2 已拒绝的 `--cwd` 参数。可用 `AGENT_RELAY_OPENCODE_COMMAND` 指定其他可执行文件。委派前先执行 `opencode auth login`；Relay 使用已有认证，不启动交互登录。
+
+输入为 `task`、绝对路径 `cwd`，以及可选的 `sessionId`、`resume`、`model`、`effort`、`agent`。已有会话优先使用 ACP resume，仅在未声明 resume 能力时回退 load；`resume: false` 强制 load。恢复失败不会创建替代会话，且必须使用原工作目录。Relay 会话记录格式保持不变；OpenCode 自身历史对话的迁移和可用性由 OpenCode 负责。
+
+model、effort、agent 必须是会话声明的可用选项。Relay 依次设置 model、effort、agent（ACP `mode`），每次设置后刷新可用选项。省略字段保留 provider 当前设置。effort 取决于所选模型，只有明确声明 `default` 时才能使用该值。
+
+V1 子进程保留 `OPENCODE_PERMISSION` 中的其他规则，同时强制 `question: "deny"`。V2 使用原生 `permissions` 规则，Relay 不转换旧环境变量对象。客户端不声明终端认证或问题表单能力，V2 ACP 会取消问题，避免等待用户回答。普通权限请求仅选择实际提供的 `allow_once`，否则返回 `PERMISSION_REQUIRED`。这不构成文件系统或网络隔离。
+
+例如，V2 工作目录可要求编辑审批，同时禁止 shell 命令：
+
+```json
+{
+  "agents": {
+    "build": {
+      "permissions": [
+        { "action": "edit", "resource": "*", "effect": "ask" },
+        { "action": "shell", "resource": "*", "effect": "deny" }
+      ]
+    }
+  }
+}
+```
+
+运行 `pnpm test:real:opencode` 执行已认证的 V2 真实测试。测试会调用已配置模型，使用临时工作目录和 Relay 状态，不修改全局配置。覆盖跨进程 resume/load、编辑、实际权限应答、会话配置、真实问题工具调用、取消、超时及私有服务清理。effort 测试要求默认模型具备 variants，否则明确失败。隔离测试覆盖 V1.18.35 和 V2.0.12 协议配置；V1 模拟覆盖不等于真实 V1 验证，也不保证跨版本历史对话迁移成功。
+
+2026 年 11 月 3 日，在 macOS、OpenCode 2.0.12 和已配置的 `opencode/pulse-alpha-free` 模型上，六项真实测试全部通过。问题工具探针在没有用户输入时返回 `stopReason: "cancelled"`。V1 和 Windows 的真实运行仍未验证。
+
 ### Codex
 
 调用 `codex_delegate` 前先安装 Codex CLI 并完成认证，无需安装 ACP 桥接包。relay 直接启动 `codex app-server --listen stdio://`，沿用 CLI 已有认证，不发起登录。协议兼容基线为 Codex CLI 0.163.0，旧版未经验证。Windows 请将 `AGENT_RELAY_CODEX_COMMAND` 指向原生 `codex.exe`，不支持 `.cmd`/`.bat` 启动器。

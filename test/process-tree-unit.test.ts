@@ -105,6 +105,86 @@ describe("process-tree system-call failures", () => {
     await expect((await controller(child)).terminate()).resolves.toEqual({ forced: false, confirmed: true });
   });
 
+  it.each(["EPERM", "EIO"])("retries an initial %s probe until disappearance and child exit are confirmed", async (code) => {
+    platform("linux");
+    vi.useFakeTimers();
+    const child = fakeChild();
+    let probes = 0;
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+      probes += 1;
+      if (probes === 1) throw Object.assign(new Error(), { code });
+      child.exitCode = 19;
+      throw Object.assign(new Error(), { code: "ESRCH" });
+    });
+    const pending = (await controller(child, { termGraceMs: 20, killConfirmMs: 80 })).terminate();
+    await vi.advanceTimersByTimeAsync(25);
+    await expect(pending).resolves.toEqual({ forced: false, confirmed: true });
+    expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+  });
+
+  it("terminates surviving descendants when an initial unknown becomes alive after the root exited", async () => {
+    platform("linux");
+    vi.useFakeTimers();
+    const child = fakeChild();
+    child.exitCode = 19;
+    let probes = 0;
+    let terminated = false;
+    const kill = vi.spyOn(process, "kill").mockImplementation((_pid, signal) => {
+      if (signal === "SIGTERM") {
+        terminated = true;
+        return true;
+      }
+      if (signal !== 0) throw new Error("unexpected signal");
+      probes += 1;
+      if (probes === 1) throw Object.assign(new Error(), { code: "EPERM" });
+      if (terminated) throw Object.assign(new Error(), { code: "ESRCH" });
+      return true;
+    });
+    const pending = (await controller(child, { termGraceMs: 20, killConfirmMs: 80 })).terminate();
+    await vi.advanceTimersByTimeAsync(25);
+    await expect(pending).resolves.toEqual({ forced: false, confirmed: true });
+    expect(kill).toHaveBeenCalledWith(-child.pid!, "SIGTERM");
+  });
+
+  it("fails closed at the initial probe deadline even when the root has exited", async () => {
+    platform("linux");
+    vi.useFakeTimers();
+    const child = fakeChild();
+    child.exitCode = 19;
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+      throw Object.assign(new Error(), { code: "EPERM" });
+    });
+    const pending = (await controller(child, { termGraceMs: 20, killConfirmMs: 80 })).terminate();
+    let settled = false;
+    void pending.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(79);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toMatchObject({
+      forced: false,
+      confirmed: false,
+      reason: "Cannot determine whether the worker process group is alive",
+    });
+    expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+  });
+
+  it("does not confirm initial probe recovery without observing the worker exit", async () => {
+    platform("linux");
+    vi.useFakeTimers();
+    let probes = 0;
+    vi.spyOn(process, "kill").mockImplementation(() => {
+      probes += 1;
+      throw Object.assign(new Error(), { code: probes === 1 ? "EPERM" : "ESRCH" });
+    });
+    const pending = (await controller(fakeChild(), { termGraceMs: 20, killConfirmMs: 80 })).terminate();
+    await vi.advanceTimersByTimeAsync(160);
+    await expect(pending).resolves.toMatchObject({
+      forced: false,
+      confirmed: false,
+      reason: "The process group disappeared but the worker exit was not observed",
+    });
+  });
+
   it("treats POSIX EPERM probe and TERM-to-KILL escalation conservatively", async () => {
     platform("linux");
     const unknown = fakeChild();

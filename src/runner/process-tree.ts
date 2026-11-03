@@ -77,7 +77,12 @@ async function terminatePosix(
     return { forced: false, confirmed: false, reason: "The worker process has no process-group reference" };
   }
   const group = -reference.pgid;
-  const initial = probePosixGroup(group);
+  const probeDeadline = Date.now() + killConfirmMs;
+  let initial = probePosixGroup(group);
+  while (initial === "unknown" && Date.now() < probeDeadline) {
+    await delay(Math.min(25, Math.max(1, probeDeadline - Date.now())));
+    initial = probePosixGroup(group);
+  }
   if (initial === "unknown") {
     return { forced: false, confirmed: false, reason: "Cannot determine whether the worker process group is alive" };
   }

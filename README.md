@@ -154,6 +154,35 @@ Calling client integrates or follows up
 
 Use separate worktrees for independent parallel tasks. Only one task may be active per resolved working directory; overlapping calls to that directory return `WORKSPACE_BUSY`.
 
+### OpenCode
+
+The relay starts `opencode acp` for both V1 and V2. It sets the child working directory and sends the absolute `cwd` in ACP session requests. It does not pass `--cwd`, which OpenCode V2 rejects. Use `AGENT_RELAY_OPENCODE_COMMAND` to select another executable. Sign in with `opencode auth login` before delegation; the relay uses existing provider credentials and does not open an interactive login.
+
+Inputs are `task`, absolute `cwd`, and optional `sessionId`, `resume`, `model`, `effort`, and `agent`. Existing sessions prefer ACP resume, fall back to load only when resume is not advertised, and use load when `resume: false`. A failed restore never creates a replacement session. Pass the original working directory. Relay records keep their existing format; OpenCode owns migration and availability of its stored conversations.
+
+Model, effort, and agent values must be advertised session options. The relay sets model, then effort, then agent (ACP `mode`), refreshing the available options after each change. Omitted fields preserve provider settings. Effort depends on the selected model; `default` is valid only when advertised.
+
+For V1, the child environment preserves `OPENCODE_PERMISSION` while forcing `question: "deny"`. V2 uses native `permissions` rules; the relay does not translate the legacy environment object. The client advertises no terminal authentication or question forms, so V2 ACP cancels questions instead of waiting for an answer. Ordinary permission requests select an offered `allow_once`; otherwise they fail with `PERMISSION_REQUIRED`. This does not provide filesystem or network isolation.
+
+For example, a V2 workspace can require approval for edits while denying shell commands:
+
+```json
+{
+  "agents": {
+    "build": {
+      "permissions": [
+        { "action": "edit", "resource": "*", "effect": "ask" },
+        { "action": "shell", "resource": "*", "effect": "deny" }
+      ]
+    }
+  }
+}
+```
+
+Run `pnpm test:real:opencode` for authenticated V2 smoke tests. They call the configured model and use disposable workspaces and relay state, without changing global configuration. Coverage includes cross-process resume/load, edits, observed permission replies, advertised configuration, actual question-tool invocation, cancellation, timeout, and private-server cleanup. The effort test requires a configured default model with variants and reports failure if none are available. V1.18.35 and V2.0.12 protocol profiles are covered by hermetic tests; a V1 profile is not a real V1 execution or a guarantee of cross-version conversation migration.
+
+On November 3, 2026, all six real smoke tests passed on macOS with OpenCode 2.0.12 and the configured `opencode/pulse-alpha-free` model. The question-tool probe returned `stopReason: "cancelled"` without user input. V1 and Windows real execution remain unverified.
+
 ### Codex
 
 Install and authenticate the Codex CLI before calling `codex_delegate`; no ACP bridge package is needed. The relay launches `codex app-server --listen stdio://` directly and uses the CLI's existing authentication. It does not initiate login. Protocol compatibility is based on Codex CLI 0.163.0; older versions are unverified. On Windows, point `AGENT_RELAY_CODEX_COMMAND` at a native `codex.exe`; `.cmd`/`.bat` launchers are unsupported.
