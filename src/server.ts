@@ -238,7 +238,7 @@ export function createRelayServer(config: RelayConfig): McpServer {
   registerDelegateTool(server, {
     name: "grok_delegate",
     title: "Delegate a task to Grok",
-    description: "Runs one Grok ACP prompt in the requested working directory and optionally resumes a saved Grok session.",
+    description: "Runs one Grok ACP prompt with workspace sandboxing and built-in web tools disabled; optionally resumes a saved session. Child network access and Grok state-directory writes remain allowed.",
     inputSchema: grokInputSchema,
     outputSchema,
     run: (input: z.infer<typeof grokInputSchema>, cwd, signal, progress) => runner.delegate({
@@ -252,7 +252,7 @@ export function createRelayServer(config: RelayConfig): McpServer {
   registerDelegateTool(server, {
     name: "cursor_delegate",
     title: "Delegate a task to Cursor",
-    description: "Runs one Cursor ACP prompt in the requested working directory and optionally resumes a saved Cursor session.",
+    description: "Runs one Cursor ACP prompt with workspace sandboxing, user-config-only network rules, WebFetch denied, and extra approvals refused; optionally resumes a saved session. Custom network allowlists and external MCP services still apply.",
     inputSchema: cursorInputSchema,
     outputSchema: cursorOutputSchema,
     run: (input: z.infer<typeof cursorInputSchema>, cwd, signal, progress) => cursorRunner.delegate({
@@ -280,7 +280,7 @@ export function createRelayServer(config: RelayConfig): McpServer {
   registerDelegateTool(server, {
     name: "opencode_delegate",
     title: "Delegate a task to OpenCode",
-    description: "Runs one OpenCode ACP prompt in the requested working directory and optionally resumes or loads a saved OpenCode session.",
+    description: "Runs one OpenCode ACP prompt with extra approvals refused and V1 external-directory/web deny rules; optionally resumes or loads a saved session. V2 permission configuration still applies. No OS sandbox: shell commands and extensions may access external files or networks.",
     inputSchema: openCodeInputSchema,
     outputSchema: openCodeOutputSchema,
     run: (input: z.infer<typeof openCodeInputSchema>, cwd, signal, progress) => openCodeRunner.delegate({
@@ -307,7 +307,7 @@ export function createRelayServer(config: RelayConfig): McpServer {
   registerDelegateTool(server, {
     name: "dsh_delegate",
     title: "Delegate a task to DSH",
-    description: "Runs one DSH ACP prompt in the requested working directory and optionally resumes a saved DSH session.",
+    description: "Runs one DSH ACP prompt with workspace-write defaults, built-in web tools disabled, and extra approvals refused; optionally resumes a saved session. Shell networking remains available; resumed sandbox mode is preserved and cannot be verified through ACP.",
     inputSchema: dshInputSchema,
     outputSchema: dshOutputSchema,
     run: (input: z.infer<typeof dshInputSchema>, cwd, signal, progress) => dshRunner.delegate({

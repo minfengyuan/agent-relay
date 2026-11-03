@@ -109,7 +109,7 @@ describeReal("real OpenCode ACP smoke", () => {
     await assertCleaned(log, store, workspace);
   }, 360_000);
 
-  it("approves allow_once permission requests so a workspace edit can complete", async () => {
+  it("refuses permission requests even when allow_once is offered", async () => {
     const { workspace, log, config, store } = await setup();
     await writeFile(join(workspace, "opencode.json"), `${JSON.stringify({
       $schema: "https://opencode.ai/config.json",
@@ -122,22 +122,21 @@ describeReal("real OpenCode ACP smoke", () => {
         },
       },
     })}\n`);
-    const result = await new OpenCodeRunner(config, store).delegate({
+    await expect(new OpenCodeRunner(config, store).delegate({
       task: "Using the built-in edit or write tool only (not bash or a shell command), create permission-probe.txt containing exactly probe followed by a newline. Do not ask questions.",
       cwd: workspace,
       agent: "build",
-    });
-    expect(result.error).toBeUndefined();
-    expect(await readFile(join(workspace, "permission-probe.txt"), "utf8")).toBe("probe\n");
+    })).rejects.toMatchObject({ code: "PERMISSION_REQUIRED" });
+    await expect(readFile(join(workspace, "permission-probe.txt"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     const entries = await trace(log);
     const permission = entries.find((entry) => entry.method === "session/request_permission");
     expect(permission).toBeDefined();
-    const selected = permission?.options?.find((option) => option.kind === "allow_once");
-    expect(selected).toBeDefined();
+    expect(permission?.options?.some((option) => option.kind === "allow_once")).toBe(true);
+    const reject = permission?.options?.find((option) => option.kind === "reject_once");
     expect(entries).toContainEqual(expect.objectContaining({
       direction: "client",
       id: permission?.id,
-      outcome: { outcome: "selected", optionId: selected?.optionId },
+      outcome: reject ? { outcome: "selected", optionId: reject.optionId } : { outcome: "cancelled" },
     }));
     await assertCleaned(log, store, workspace);
   }, 180_000);

@@ -43,7 +43,7 @@ describe("OpenCodeRunner", () => {
     expect(events).toContain("delegated:1");
     expect(events).toContain("auth:opencode-login");
     expect(events).toContain("new:");
-    expect(events).toContain('permission-env:{"bash":"allow","question":"deny"}');
+    expect(events).toContain('permission-env:{"bash":"allow","question":"deny","external_directory":"deny","webfetch":"deny","websearch":"deny"}');
     expect(events).toContain("This is a noninteractive delegated task.");
     expect(events).not.toContain("set-config:");
     expect(events).not.toContain('"readTextFile":true');
@@ -291,16 +291,16 @@ describe("OpenCodeRunner", () => {
     vi.stubEnv("OPENCODE_RELAY_SMOKE_LOG", log);
     vi.stubEnv("FAKE_ACP_MODE", "permission");
     const proxy = fileURLToPath(new URL("./fixtures/opencode-smoke-proxy.mjs", import.meta.url));
-    const result = await new OpenCodeRunner(config(state, {
+    await expect(new OpenCodeRunner(config(state, {
       opencodeCommandArgs: [proxy, process.execPath, opencodeFixture],
-    }), new SessionStore(state, "opencode")).delegate({ task: "private-task-content", cwd });
-    expect(result.text).toBe("fresh answer");
+    }), new SessionStore(state, "opencode")).delegate({ task: "private-task-content", cwd }))
+      .rejects.toMatchObject({ code: "PERMISSION_REQUIRED" });
     const recorded = await readFile(log, "utf8");
     const entries = recorded.trim().split("\n").map((line) => JSON.parse(line));
     expect(entries).toContainEqual(expect.objectContaining({ method: "session/request_permission" }));
     expect(entries).toContainEqual(expect.objectContaining({
       direction: "client",
-      outcome: { outcome: "selected", optionId: "allow-once-actual" },
+      outcome: { outcome: "selected", optionId: "reject-actual" },
     }));
     expect(recorded).not.toContain("private-task-content");
     expect(recorded).not.toContain("allowed.txt");
@@ -343,34 +343,34 @@ describe("OpenCodeRunner", () => {
     await lease.release();
   });
 
-  it("selects the actual allow_once option id and continues", async () => {
+  it("rejects permission even when allow_once is offered and releases the workspace", async () => {
     vi.stubEnv("FAKE_ACP_MODE", "permission");
     const state = await tempDir();
     const cwd = await tempDir();
     const log = join(state, "allow.log");
     vi.stubEnv("FAKE_ACP_LOG", log);
-    const result = await new OpenCodeRunner(config(state), new SessionStore(state, "opencode")).delegate({
+    const store = new SessionStore(state, "opencode");
+    await expect(new OpenCodeRunner(config(state), store).delegate({
       task: "permission",
       cwd,
-    });
-    expect(result).toMatchObject({
-      provider: "opencode",
-      stopReason: "end_turn",
-      text: "fresh answer",
-    });
+    })).rejects.toMatchObject({ code: "PERMISSION_REQUIRED", partial: { provider: "opencode", sessionId: "fake-session-1" } });
     expect(await readFile(log, "utf8")).toContain(
-      'permission-response:{"outcome":{"outcome":"selected","optionId":"allow-once-actual"}}',
+      'permission-response:{"outcome":{"outcome":"selected","optionId":"reject-actual"}}',
     );
+    expect(await readFile(log, "utf8")).not.toContain('"optionId":"allow-once-actual"');
     expect(await readFile(log, "utf8")).not.toContain("always-actual");
+    const lease = await store.acquire(cwd);
+    await lease.markReaped("no-worker-created");
+    await lease.release();
   });
 
-  it("cancels when allow_once is missing and preserves partial output", async () => {
-    vi.stubEnv("FAKE_ACP_MODE", "permission-missing");
+  it("cancels when reject_once is missing and preserves partial output", async () => {
+    vi.stubEnv("FAKE_ACP_MODE", "permission-no-reject");
     const state = await tempDir();
     const cwd = await tempDir();
     const log = join(state, "missing.log");
     vi.stubEnv("FAKE_ACP_LOG", log);
-    await expect(new OpenCodeRunner(config(state), new SessionStore(state, "opencode")).delegate({
+    await expect(new OpenCodeRunner(config(state, { cancelGraceMs: 1_000 }), new SessionStore(state, "opencode")).delegate({
       task: "permission",
       cwd,
     })).rejects.toMatchObject({
@@ -579,6 +579,23 @@ describe("OpenCode permission overlay", () => {
     const log = join(state, "default-env.log");
     vi.stubEnv("FAKE_ACP_LOG", log);
     await new OpenCodeRunner(config(state), new SessionStore(state, "opencode")).delegate({ task: "one", cwd });
-    expect(await readFile(log, "utf8")).toContain('permission-env:{"question":"deny"}');
+    expect(await readFile(log, "utf8")).toContain('permission-env:{"question":"deny","external_directory":"deny","webfetch":"deny","websearch":"deny"}');
+  });
+
+  it("overrides unsafe grants and preserves unrelated restrictive permissions", async () => {
+    const state = await tempDir();
+    const cwd = await tempDir();
+    const log = join(state, "restricted-env.log");
+    vi.stubEnv("FAKE_ACP_LOG", log);
+    vi.stubEnv("OPENCODE_PERMISSION", JSON.stringify({
+      bash: { "*": "ask", "rm *": "deny" }, edit: "deny",
+      question: "allow", external_directory: "allow", webfetch: "allow", websearch: "allow",
+    }));
+    await new OpenCodeRunner(config(state), new SessionStore(state, "opencode")).delegate({ task: "one", cwd });
+    const entry = (await readFile(log, "utf8")).split("\n").find((line) => line.startsWith("permission-env:"))!;
+    expect(JSON.parse(entry.slice("permission-env:".length))).toEqual({
+      bash: { "*": "ask", "rm *": "deny" }, edit: "deny",
+      question: "deny", external_directory: "deny", webfetch: "deny", websearch: "deny",
+    });
   });
 });

@@ -38,6 +38,12 @@ export type SessionExtras = {
   metadata: Pick<SessionRecord, "model" | "mode">;
 };
 
+export type PreparedSpawn = {
+  env: NodeJS.ProcessEnv;
+  extraArgs?: string[];
+  dispose(): Promise<void>;
+};
+
 export type ProviderAdapter<I extends DelegateInput, R extends RelayResult> = {
   provider: Provider;
   displayName: string;
@@ -49,6 +55,8 @@ export type ProviderAdapter<I extends DelegateInput, R extends RelayResult> = {
   sessionMetadata(input: I, record?: SessionRecord): Pick<SessionRecord, "model" | "mode">;
   persistNewSessionBeforeConfigure?: boolean;
   spawnEnv?(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
+  prepareSpawn?(input: I, env: NodeJS.ProcessEnv): Promise<PreparedSpawn>;
+  permissionWarning?(input: I): string;
   existingSession?(initialized: acp.InitializeResponse, input: I): ExistingSessionAction;
   validateInitialized?(initialized: acp.InitializeResponse): void;
   validateInput?(input: I): void;

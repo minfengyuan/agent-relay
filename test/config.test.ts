@@ -7,6 +7,12 @@ import { OpenCodeSummaries, StandardSummaries } from "../src/runner/summaries.js
 import type * as acp from "@agentclientprotocol/sdk";
 
 describe("loadConfig", () => {
+  it("keeps the Grok workspace sandbox and disables native web tools", () => {
+    expect(loadConfig({}).commandArgs).toEqual([
+      "--no-auto-update", "--sandbox", "workspace", "--disable-web-search",
+      "--deny", "WebFetch", "--deny", "WebSearch", "agent", "--always-approve", "--no-leader", "stdio",
+    ]);
+  });
   it("defaults to native codex and trims its executable override", () => {
     expect(loadConfig({}).codexCommand).toBe("codex");
     expect(loadConfig({}).codexCommandArgs).toBeUndefined();

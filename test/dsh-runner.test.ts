@@ -1,10 +1,11 @@
 import { realpathSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { dshSpawnSpec, resolveWindowsDshLauncher } from "../src/adapters/dsh.js";
 import { loadConfig } from "../src/config.js";
+import { dshPolicyPatch } from "../src/adapters/dsh-policy.js";
 import { DshRunner, GrokRunner, OpenCodeRunner } from "../src/runner.js";
 import { SessionStore } from "../src/store.js";
 import { baseConfig as config, dshFixture, tempDir as makeTempDir, useRunnerCleanup, waitForLog } from "./helpers.js";
@@ -81,6 +82,34 @@ function expectAcpFailure(run: () => unknown, needle: string): void {
 }
 
 describe("DshRunner", () => {
+  it("passes the native permission patch on new and resumed sessions without editing profiles", async () => {
+    const state = await tempDir();
+    const cwd = await tempDir();
+    const log = join(state, "policy.log");
+    vi.stubEnv("FAKE_ACP_LOG", log);
+    vi.stubEnv("DSH_PERMISSION_MODE", "danger-full-access");
+    const warnings = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const runner = new DshRunner(config(state), new SessionStore(state, "dsh"));
+      const first = await runner.delegate({ task: "one", cwd });
+      await runner.delegate({ task: "two", cwd, sessionId: first.sessionId! });
+      const events = (await readFile(log, "utf8")).split("\n");
+      expect(events.filter((line) => line.startsWith("policy-patch:"))).toEqual([
+        `policy-patch:${JSON.stringify(dshPolicyPatch)}`, `policy-patch:${JSON.stringify(dshPolicyPatch)}`,
+      ]);
+      expect(events.filter((line) => line === "policy-mode:workspace-write")).toHaveLength(2);
+      expect(dshPolicyPatch).toContain("defaultPreset: workspace-write");
+      expect(dshPolicyPatch).toContain("policy: ask");
+      expect(dshPolicyPatch).toContain("search: false");
+      expect(dshPolicyPatch).toContain("fetch: false");
+      expect(warnings).toHaveBeenCalledWith(expect.stringContaining("resumed-session permissions are not unified"));
+      expect((await readdir(state)).filter((entry) => entry.startsWith("dsh-config-"))).toEqual([]);
+      expect(process.env.DSH_PERMISSION_MODE).toBe("danger-full-access");
+    } finally {
+      warnings.mockRestore();
+    }
+  });
+
   it("constructs default dsh argv when dshCommandArgs is omitted", () => {
     if (process.platform !== "win32") {
       expect(dshSpawnSpec(loadConfig({}))).toEqual({ command: "dsh", args: ["--profile", "acp"] });
@@ -816,7 +845,7 @@ describe("DshRunner", () => {
     const result = await new DshRunner(cfg, new SessionStore(state, "dsh")).delegate({ task: "one", cwd });
     expect(result).toMatchObject({ provider: "dsh", sessionId: "fake-session-1", text: "fresh answer" });
     const events = await readFile(overrideLog, "utf8");
-    expect(events).toContain(JSON.stringify([resolvedEntry, "--profile", "acp"]));
+    expect(events).toContain(JSON.stringify([resolvedEntry, "--profile", "acp", "--patch"]).slice(0, -1));
     expect(events).toContain("new:");
     expect(events).not.toContain("cmd.exe");
   });

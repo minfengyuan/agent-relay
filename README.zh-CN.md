@@ -162,7 +162,7 @@ Relay 对 V1、V2 均使用 `opencode acp`，通过子进程工作目录和 ACP 
 
 model、effort、agent 必须是会话声明的可用选项。Relay 依次设置 model、effort、agent（ACP `mode`），每次设置后刷新可用选项。省略字段保留 provider 当前设置。effort 取决于所选模型，只有明确声明 `default` 时才能使用该值。
 
-V1 子进程保留 `OPENCODE_PERMISSION` 中的其他规则，同时强制 `question: "deny"`。V2 使用原生 `permissions` 规则，Relay 不转换旧环境变量对象。客户端不声明终端认证或问题表单能力，V2 ACP 会取消问题，避免等待用户回答。普通权限请求仅选择实际提供的 `allow_once`，否则返回 `PERMISSION_REQUIRED`。这不构成文件系统或网络隔离。
+V1 子进程保留 `OPENCODE_PERMISSION` 中的其他规则，同时强制 `question`、`external_directory`、`webfetch`、`websearch` 为 `"deny"`。V2 使用原生 `permissions` 规则，Relay 不转换旧环境变量对象。客户端不声明终端认证或问题表单能力，V2 ACP 会取消问题，避免等待用户回答。两个版本均拒绝普通权限请求：有 `reject_once` 就选择拒绝，否则取消，并返回 `PERMISSION_REQUIRED`。这不构成文件系统或网络隔离。
 
 例如，V2 工作目录可要求编辑审批，同时禁止 shell 命令：
 
@@ -181,7 +181,7 @@ V1 子进程保留 `OPENCODE_PERMISSION` 中的其他规则，同时强制 `ques
 
 运行 `pnpm test:real:opencode` 执行已认证的 V2 真实测试。测试会调用已配置模型，使用临时工作目录和 Relay 状态，不修改全局配置。覆盖跨进程 resume/load、编辑、实际权限应答、会话配置、真实问题工具调用、取消、超时及私有服务清理。effort 测试要求默认模型具备 variants，否则明确失败。隔离测试覆盖 V1.18.35 和 V2.0.12 协议配置；V1 模拟覆盖不等于真实 V1 验证，也不保证跨版本历史对话迁移成功。
 
-2026 年 11 月 3 日，在 macOS、OpenCode 2.0.12 和已配置的 `opencode/pulse-alpha-free` 模型上，六项真实测试全部通过。问题工具探针在没有用户输入时返回 `stopReason: "cancelled"`。V1 和 Windows 的真实运行仍未验证。
+2026 年 11 月 3 日，在 macOS、OpenCode 2.0.12 和已配置的 `opencode/pulse-alpha-free` 模型上，六项真实测试在此前 `allow_once` 策略下全部通过。问题工具探针在没有用户输入时返回 `stopReason: "cancelled"`。新的拒绝策略尚未重新进行真实 provider 验证；V1 和 Windows 的真实运行仍未验证。
 
 ### Codex
 
@@ -202,6 +202,28 @@ V1 子进程保留 `OPENCODE_PERMISSION` 中的其他规则，同时强制 `ques
 结果包含 `provider: "codex"`、`sessionId`、`stopReason`、`text`、`truncated`，以及可选的有界 `toolCalls`、`summariesTruncated` 和原生 token `usage`（`total`、`last`、`modelContextWindow`）。只有轮次完成才算成功。失败保留已确认的会话 ID 和部分输出；取消或超时会中断轮次并清理进程树。协议不兼容返回 `PROTOCOL_MISMATCH`，其他原生失败使用 `CODEX_FAILURE`。
 
 真实 smoke 需显式运行 `pnpm test:real:codex`，或 `RUN_CODEX_REAL_TESTS=1 pnpm exec vitest run test/codex-real-smoke.test.ts`。测试使用临时状态和工作目录，但会使用真实 Codex 账户和服务。
+
+### 原生权限策略
+
+relay 使用各 CLI 的原生控制设置工作区可写并关闭已知 Web 工具。各 provider 的能力不同。额外 ACP/native 审批请求均拒绝；Grok 的意外权限请求直接失败，不会打开交互审批流程。
+
+| Agent | Relay 配置 | 剩余限制 |
+| --- | --- | --- |
+| Codex | `workspace-write`，禁用沙箱网络与内置 Web Search；新建、恢复线程和每轮执行均重新设置 | 默认临时目录仍可写；模型 API 流量和外部 MCP 服务不在此边界内 |
+| Grok | `--sandbox workspace`、`--disable-web-search`、`WebFetch`/`WebSearch` 拒绝规则；沙箱内保留 `--always-approve` | Grok 状态目录和临时目录可写；workspace profile 允许子进程联网；自定义网络限制仅在 Linux 生效，macOS 不等价 |
+| Cursor | `--sandbox enabled --workspace <cwd>`、`approvalMode: allowlist`、`sandbox.networkAccess: user_config_only`，拒绝 `WebFetch(*)` | 自定义沙箱网络白名单及本地/团队策略仍生效；不等于全面禁网 |
+| OpenCode | 强制 V1 `OPENCODE_PERMISSION` 中的 `question`、`external_directory`、`webfetch`、`websearch` 为 `deny`；两个版本均拒绝额外 ACP 审批 | 不转换为 V2 权限规则，V2 自身配置仍生效；没有 OS 沙箱，shell、插件和外部 MCP 工具仍可能越界写入或联网；V1 外部目录拒绝也限制受支持工具的外部读取 |
+| DSH | 原生 `--patch` 将 sandbox mode 与新会话默认预设设为 `workspace-write`，审批为 `ask`，关闭 `web_search`/`web_fetch` | 文件沙箱不限制 shell 网络；恢复会话保留旧 sandbox mode，ACP 无法验证或重置；Windows ACL 和较旧 Linux Landlock 后端可能仅提供部分文件隔离 |
+
+**OpenCode 行为变化：** 不再通过 `allow_once` 自动授予权限。有 `reject_once` 就选择拒绝，否则取消，并返回带可用部分结果的 `PERMISSION_REQUIRED`。
+
+Cursor 使用 relay 状态目录下的私有 CLI 配置快照。原有 CLI 设置、认证相关配置、环境凭据及正常的 OS 凭据发现保留；只覆盖上表中的权限/沙箱设置并补齐缺失的配置结构默认值。不修改原 CLI 配置或项目文件。通过 `CURSOR_CONFIG_DIR` 或 `XDG_CONFIG_HOME` 定位原配置；正常数据目录和模型/API 连接保持不变。
+
+DSH 接收包含 relay 随包原生 patch 的私有文件，参数追加在其他启动参数之后。不修改用户 profile；`DSH_PERMISSION_MODE` 仅在子进程环境中设置。原生配置文件在确认进程清理后删除，包括启动失败、取消和超时；无法确认清理时保留文件。配置准备失败会返回结构化错误，不会无约束重试。进程崩溃可能遗留私有目录，只有确认没有工作进程使用时才能删除。
+
+Grok、Cursor、OpenCode 和 DSH 每次执行向 stderr 输出一次有长度限制的策略诊断；DSH 恢复诊断明确指出旧会话权限未统一。诊断不包含凭据或任务文本。上述设置不隔离外部 MCP 服务。自定义可执行文件/包装器必须遵守原生参数与配置；替换可执行文件不代表限制已经生效。
+
+策略通过各 provider 自身支持的后端面向 macOS、Linux 和 Windows；relay 能启动 CLI 不代表该平台具备可用沙箱。隔离测试验证配置和拒绝行为，不证明真实 CLI 隔离能力。真实 CLI 验收仍需显式启用：在临时工作区检查内部/外部写入、shell 联网、Web 工具与恢复会话，记录 OS、CLI 版本及实际结果。未执行的平台与能力均标记为未验证。
 
 ## 配置
 

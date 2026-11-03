@@ -29,7 +29,12 @@ function overlayOpenCodePermission(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
       throw new RelayFailure("OPENCODE_PERMISSION_INVALID", "OPENCODE_PERMISSION must be a JSON object");
     }
   }
-  return { ...env, OPENCODE_PERMISSION: JSON.stringify({ ...parsed, question: "deny" }) };
+  return {
+    ...env,
+    OPENCODE_PERMISSION: JSON.stringify({
+      ...parsed, question: "deny", external_directory: "deny", webfetch: "deny", websearch: "deny",
+    }),
+  };
 }
 
 function opencodeAdapter(config: RelayConfig): ProviderAdapter<OpenCodeDelegateInput, OpenCodeRelayResult> {
@@ -52,6 +57,7 @@ function opencodeAdapter(config: RelayConfig): ProviderAdapter<OpenCodeDelegateI
     prompt: (task) => `This is a noninteractive delegated task. Do not ask the user questions. Resolve minor ambiguity conservatively. If a material decision is unresolved, stop and report it.\n\n${task}`,
     sessionMetadata: () => ({}),
     spawnEnv: overlayOpenCodePermission,
+    permissionWarning: () => "OpenCode refuses extra ACP approvals and sets V1 external-directory/web deny rules. V2 permission configuration still applies; neither version provides OS isolation of shell commands, plugins or external MCP services.",
     validateInput(input) {
       if (input.resume !== undefined && !input.sessionId) {
         throw new RelayFailure("INVALID_INPUT", "resume requires sessionId");
@@ -73,20 +79,19 @@ function opencodeAdapter(config: RelayConfig): ProviderAdapter<OpenCodeDelegateI
       if (params.sessionId !== rt.sessionId || rt.signal.aborted || rt.hasFailure()) {
         return cancelledPermission();
       }
-      const allowOnce = params.options.find((option) => option.kind === "allow_once");
-      if (!allowOnce) {
-        rt.markRequested();
-        const permissionLabel = boundedString(params.toolCall.title ?? params.toolCall.toolCallId, 256);
-        const permissionFailure = new RelayFailure(
-          "PERMISSION_REQUIRED",
-          `OpenCode requested permission without an allow_once option: ${permissionLabel}`,
-          rt.partial(),
-        );
-        rt.setFailure(permissionFailure);
-        setImmediate(() => rt.abort(permissionFailure));
-        return cancelledPermission();
-      }
-      return { outcome: { outcome: "selected" as const, optionId: allowOnce.optionId } };
+      rt.markRequested();
+      const reject = params.options.find((option) => option.kind === "reject_once");
+      const permissionLabel = boundedString(params.toolCall.title ?? params.toolCall.toolCallId, 256);
+      const permissionFailure = new RelayFailure(
+        "PERMISSION_REQUIRED",
+        `OpenCode permission was rejected: ${permissionLabel}`,
+        rt.partial(),
+      );
+      rt.setFailure(permissionFailure);
+      setImmediate(() => rt.abort(permissionFailure));
+      return reject
+        ? { outcome: { outcome: "selected" as const, optionId: reject.optionId } }
+        : cancelledPermission();
     },
     async configureSession(ctx, sessionId, input, extras, signal) {
       const requested = [
