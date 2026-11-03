@@ -204,7 +204,7 @@ export class CodexRunner {
       }
       const policy = {
         cwd: input.cwd, approvalPolicy: "on-request", approvalsReviewer: "user", sandbox: "workspace-write",
-        config: { "sandbox_workspace_write.network_access": false },
+        config: { "sandbox_workspace_write.network_access": false, web_search: "disabled" },
         ...(input.model === undefined ? {} : { model: input.model }),
       };
       const response = record

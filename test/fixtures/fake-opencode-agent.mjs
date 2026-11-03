@@ -116,7 +116,7 @@ if (mode === "malformed") {
         log(`descendant:${descendant.pid}`);
         descendant.unref();
       }
-      if (mode === "permission" || mode === "permission-missing") {
+      if (mode === "permission" || mode === "permission-missing" || mode === "permission-no-reject") {
         const outcome = await ctx.client.request(acp.methods.client.session.requestPermission, {
           sessionId: ctx.params.sessionId,
           toolCall: {
@@ -126,7 +126,9 @@ if (mode === "malformed") {
             content: [],
             rawInput: { path: "allowed.txt" },
           },
-          options: mode === "permission-missing"
+          options: mode === "permission-no-reject"
+            ? [{ optionId: "allow-once-actual", name: "Once", kind: "allow_once" }]
+            : mode === "permission-missing"
             ? [
                 { optionId: "always-actual", name: "Always", kind: "allow_always" },
                 { optionId: "reject-actual", name: "Reject", kind: "reject_once" },

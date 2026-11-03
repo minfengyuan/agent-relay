@@ -25,6 +25,7 @@ function grokAdapter(config: RelayConfig): ProviderAdapter<DelegateInput, GrokRe
       return { methodId, _meta: { headless: true } };
     },
     capabilities: {},
+    permissionWarning: () => "Grok workspace sandboxing allows its state directory and child network access; built-in web search/fetch are disabled. This is not complete network isolation.",
     prompt: (task) => task,
     sessionMetadata: () => ({}),
     createSummarizer: () => new EmptySummarizer(),

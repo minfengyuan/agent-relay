@@ -1,9 +1,9 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { CursorRunner } from "../src/runner.js";
 import { SessionStore } from "../src/store.js";
-import { baseConfig as config, tempDir as makeTempDir, useRunnerCleanup } from "./helpers.js";
+import { baseConfig as config, tempDir as makeTempDir, useRunnerCleanup, waitForLog } from "./helpers.js";
 
 const dirs: string[] = [];
 vi.setConfig({ testTimeout: 15_000 });
@@ -32,7 +32,7 @@ describe("CursorRunner", () => {
     });
     await new CursorRunner(config(state), store).delegate({ task: "two", cwd, sessionId: "fake-session-1" });
     const events = await readFile(log, "utf8");
-    expect(events).toContain('argv:["--sandbox","enabled","--model","test-model","--mode","ask","acp"]');
+    expect(events).toContain(`argv:${JSON.stringify(["--sandbox", "enabled", "--workspace", cwd, "--model", "test-model", "--mode", "ask", "acp"])}`);
     expect(events).toContain('"fs":{"readTextFile":false,"writeTextFile":false}');
     expect(events).toContain('"terminal":false');
     expect(events).toContain("auth:cursor_login");
@@ -41,6 +41,117 @@ describe("CursorRunner", () => {
     expect(events).toContain('"name":"agent-relay"');
     expect(events).toContain("Work non-interactively.");
   }, 15_000);
+
+  it("isolates the native configuration, preserves existing restrictions, and cleans it after resume", async () => {
+    const state = await tempDir();
+    const cwd = await tempDir();
+    const source = join(await tempDir(), "cursor config with spaces");
+    await mkdir(source);
+    vi.stubEnv("CURSOR_CONFIG_DIR", source);
+    vi.stubEnv("FAKE_CURSOR_CONFIG_MUTATE", "1");
+    const original = JSON.stringify({
+      version: 1,
+      model: { displayModelId: "custom" },
+      authInfo: { activeTeamId: 42 },
+      approvalMode: "unrestricted",
+      permissions: { allow: ["Shell(ls)"], deny: ["Write(**/*.key)"] },
+      sandbox: { mode: "disabled", networkAccess: "allow_all", readBoundary: "workspace" },
+    });
+    await writeFile(join(source, "cli-config.json"), original);
+    const log = join(state, "config.log");
+    vi.stubEnv("FAKE_ACP_LOG", log);
+    const runner = new CursorRunner(config(state), new SessionStore(state, "cursor"));
+    const first = await runner.delegate({ task: "one", cwd });
+    await runner.delegate({ task: "two", cwd, sessionId: first.sessionId! });
+    const events = (await readFile(log, "utf8")).split("\n");
+    const snapshots = events.filter((line) => line.startsWith("cursor-config:"))
+      .map((line) => JSON.parse(line.slice("cursor-config:".length)));
+    expect(snapshots).toHaveLength(2);
+    for (const snapshot of snapshots) {
+      expect(snapshot).toMatchObject({
+        model: { displayModelId: "custom" }, authInfo: { activeTeamId: 42 },
+        approvalMode: "allowlist",
+        permissions: { allow: ["Shell(ls)"], deny: ["Write(**/*.key)", "WebFetch(*)"] },
+        sandbox: { mode: "enabled", networkAccess: "user_config_only", readBoundary: "workspace" },
+      });
+    }
+    expect(await readFile(join(source, "cli-config.json"), "utf8")).toBe(original);
+    expect((await readdir(state)).filter((entry) => entry.startsWith("cursor-config-"))).toEqual([]);
+    const directories = events.filter((line) => line.startsWith("cursor-config-dir:"));
+    expect(new Set(directories).size).toBe(2);
+  });
+
+  it.each(["{private-invalid", '{"permissions":{"deny":"private-invalid"}}', '{"sandbox":[]}'])(
+    "rejects invalid native configuration without spawning or exposing contents: %s",
+    async (contents) => {
+      const state = await tempDir();
+      const cwd = await tempDir();
+      await writeFile(join(process.env.CURSOR_CONFIG_DIR!, "cli-config.json"), contents);
+      const log = join(state, "invalid.log");
+      vi.stubEnv("FAKE_ACP_LOG", log);
+      await expect(new CursorRunner(config(state), new SessionStore(state, "cursor")).delegate({ task: "one", cwd }))
+        .rejects.toMatchObject({ code: "CONFIG_UNSUPPORTED", message: "Cannot prepare cursor native permission configuration" });
+      await expect(readFile(log)).rejects.toMatchObject({ code: "ENOENT" });
+      expect((await readdir(state)).filter((entry) => entry.startsWith("cursor-config-"))).toEqual([]);
+      const lease = await new SessionStore(state).acquire(cwd);
+      await lease.markReaped("no-worker-created");
+      await lease.release();
+    },
+  );
+
+  it("removes native configuration after authentication failure", async () => {
+    const state = await tempDir();
+    const cwd = await tempDir();
+    vi.stubEnv("FAKE_ACP_MODE", "no-auth");
+    await expect(new CursorRunner(config(state), new SessionStore(state, "cursor")).delegate({ task: "one", cwd }))
+      .rejects.toMatchObject({ code: "AUTH_UNAVAILABLE" });
+    expect((await readdir(state)).filter((entry) => entry.startsWith("cursor-config-"))).toEqual([]);
+  });
+
+  it.runIf(process.platform !== "win32")("retains native configuration and the lock when process cleanup cannot be confirmed", async () => {
+    const state = await tempDir();
+    const cwd = await tempDir();
+    vi.stubEnv("FAKE_ACP_MODE", "no-auth");
+    const kill = process.kill.bind(process);
+    const probe = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (pid < 0 && signal === 0) throw Object.assign(new Error("Probe unavailable"), { code: "EPERM" });
+      return kill(pid, signal);
+    });
+    try {
+      const store = new SessionStore(state, "cursor");
+      await expect(new CursorRunner(config(state, { killConfirmMs: 50 }), store).delegate({ task: "one", cwd }))
+        .rejects.toMatchObject({ code: "PROCESS_CLEANUP_FAILED" });
+      expect((await readdir(state)).filter((entry) => entry.startsWith("cursor-config-"))).toHaveLength(1);
+      await expect(store.acquire(cwd)).rejects.toMatchObject({ code: "WORKSPACE_BUSY" });
+    } finally {
+      probe.mockRestore();
+    }
+  });
+
+  it.each(["cancel", "timeout", "spawn"])("cleans native configuration and releases the workspace after %s", async (failure) => {
+    const state = await tempDir();
+    const cwd = await tempDir();
+    const settings = config(state, { ...(failure === "timeout" ? { totalTimeoutMs: 1_000 } : {}) });
+    const log = join(state, "cleanup.log");
+    vi.stubEnv("FAKE_ACP_LOG", log);
+    vi.stubEnv("FAKE_ACP_MODE", "hang");
+    if (failure === "spawn") settings.cursorCommand = join(state, "missing-executable");
+    const controller = new AbortController();
+    const store = new SessionStore(state, "cursor");
+    const pending = new CursorRunner(settings, store).delegate({ task: "hang", cwd }, controller.signal);
+    const rejected = expect(pending).rejects.toMatchObject({
+      code: failure === "cancel" ? "CANCELLED" : failure === "timeout" ? "TIMEOUT" : "ACP_FAILURE",
+    });
+    if (failure === "cancel") {
+      await waitForLog(log, "new:");
+      controller.abort();
+    }
+    await rejected;
+    expect((await readdir(state)).filter((entry) => entry.startsWith("cursor-config-"))).toEqual([]);
+    const lease = await store.acquire(cwd);
+    await lease.markReaped("no-worker-created");
+    await lease.release();
+  });
 
   it("requires an explicit Cursor command and rejects nested delegation", async () => {
     const state = await tempDir();

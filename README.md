@@ -162,7 +162,7 @@ Inputs are `task`, absolute `cwd`, and optional `sessionId`, `resume`, `model`, 
 
 Model, effort, and agent values must be advertised session options. The relay sets model, then effort, then agent (ACP `mode`), refreshing the available options after each change. Omitted fields preserve provider settings. Effort depends on the selected model; `default` is valid only when advertised.
 
-For V1, the child environment preserves `OPENCODE_PERMISSION` while forcing `question: "deny"`. V2 uses native `permissions` rules; the relay does not translate the legacy environment object. The client advertises no terminal authentication or question forms, so V2 ACP cancels questions instead of waiting for an answer. Ordinary permission requests select an offered `allow_once`; otherwise they fail with `PERMISSION_REQUIRED`. This does not provide filesystem or network isolation.
+For V1, the child environment preserves other `OPENCODE_PERMISSION` rules while forcing `question`, `external_directory`, `webfetch`, and `websearch` to `"deny"`. V2 uses native `permissions` rules; the relay does not translate the legacy environment object. The client advertises no terminal authentication or question forms, so V2 ACP cancels questions instead of waiting for an answer. Both versions refuse ordinary permission requests through `reject_once` when offered, otherwise cancel, and fail with `PERMISSION_REQUIRED`. This does not provide filesystem or network isolation.
 
 For example, a V2 workspace can require approval for edits while denying shell commands:
 
@@ -181,7 +181,7 @@ For example, a V2 workspace can require approval for edits while denying shell c
 
 Run `pnpm test:real:opencode` for authenticated V2 smoke tests. They call the configured model and use disposable workspaces and relay state, without changing global configuration. Coverage includes cross-process resume/load, edits, observed permission replies, advertised configuration, actual question-tool invocation, cancellation, timeout, and private-server cleanup. The effort test requires a configured default model with variants and reports failure if none are available. V1.18.35 and V2.0.12 protocol profiles are covered by hermetic tests; a V1 profile is not a real V1 execution or a guarantee of cross-version conversation migration.
 
-On November 3, 2026, all six real smoke tests passed on macOS with OpenCode 2.0.12 and the configured `opencode/pulse-alpha-free` model. The question-tool probe returned `stopReason: "cancelled"` without user input. V1 and Windows real execution remain unverified.
+On November 3, 2026, all six real smoke tests passed on macOS with OpenCode 2.0.12 and the configured `opencode/pulse-alpha-free` model under the previous `allow_once` policy. The question-tool probe returned `stopReason: "cancelled"` without user input. The new refusal policy has not been revalidated with a real provider. V1 and Windows real execution remain unverified.
 
 ### Codex
 
@@ -202,6 +202,28 @@ New and resumed turns use workspace-write sandboxing, disabled sandbox network a
 Results include `provider: "codex"`, `sessionId`, `stopReason`, `text`, and `truncated`, plus optional bounded `toolCalls`, `summariesTruncated`, and native token `usage` (`total`, `last`, `modelContextWindow`). Only a completed turn succeeds. Failure retains confirmed session IDs and partial output; cancellation/timeout interrupts the turn and cleans up its process tree. Protocol incompatibility returns `PROTOCOL_MISMATCH`; other native failures use `CODEX_FAILURE`.
 
 Run the opt-in authenticated smoke with `pnpm test:real:codex` (or `RUN_CODEX_REAL_TESTS=1 pnpm exec vitest run test/codex-real-smoke.test.ts`). It uses disposable state/workspaces but the real Codex account and service.
+
+### Native permission policy
+
+The relay applies workspace-write settings and disables known web tools through each CLI's native controls. These controls are not equivalent across providers. Extra ACP/native approval requests are refused; Grok's unexpected requests fail instead of opening an interactive approval flow.
+
+| Agent | Relay configuration | Remaining limits |
+| --- | --- | --- |
+| Codex | `workspace-write`, sandbox network disabled, built-in web search disabled; reapplied to new/resumed threads and every turn | Default temporary directories remain writable. Model API traffic and external MCP services are outside this boundary |
+| Grok | `--sandbox workspace`, `--disable-web-search`, `WebFetch`/`WebSearch` deny rules; retains `--always-approve` inside the sandbox | Grok state directories and temp remain writable; the workspace profile permits child network access. Custom network restrictions are Linux-only, not equivalent on macOS |
+| Cursor | `--sandbox enabled --workspace <cwd>`, `approvalMode: allowlist`, `sandbox.networkAccess: user_config_only`, `WebFetch(*)` denied | Custom sandbox network allowlists and local/team policy still apply; this is not a blanket network block |
+| OpenCode | Forces V1 `OPENCODE_PERMISSION` entries `question`, `external_directory`, `webfetch`, and `websearch` to `deny`; refuses extra ACP approvals in both versions | No V2 permission translation; V2's own configuration still applies. No OS sandbox: shell, plugins and external MCP tools can write outside the workspace or use the network. V1 external-directory denial also restricts supported external reads |
+| DSH | Native `--patch` sets sandbox mode and new-session default preset to `workspace-write`, approval to `ask`, and disables `web_search`/`web_fetch` | The file sandbox does not restrict shell networking. Resumed sessions retain saved sandbox mode; ACP cannot verify or reset it. Windows ACL and older Linux Landlock backends may provide partial file enforcement |
+
+**OpenCode behavior change:** permission requests are no longer automatically granted with `allow_once`. The relay selects `reject_once` when offered, otherwise cancels, and returns `PERMISSION_REQUIRED` with available partial output.
+
+Cursor uses a private snapshot of its CLI configuration under the relay state directory. Existing CLI settings, authentication-related configuration, environment credentials and normal OS credential discovery are retained. Only the permission/sandbox settings above are overridden, with missing schema defaults supplied. The source CLI configuration and project files are not edited. `CURSOR_CONFIG_DIR` or `XDG_CONFIG_HOME` locates the source CLI configuration; the normal data directory and model/API connection remain unchanged.
+
+DSH receives a private file containing the relay's bundled native patch, appended after other launch arguments. User profiles are not edited; `DSH_PERMISSION_MODE` is set only in the child environment. Native configuration files are removed after confirmed process cleanup, including startup failure, cancellation and timeout; they are retained if cleanup cannot be confirmed. Preparation errors fail structurally without an unrestricted retry. A process crash may leave private directories behind; remove them only after confirming no worker still uses them.
+
+Grok, Cursor, OpenCode and DSH emit one bounded stderr diagnostic per execution describing policy limits. DSH resume diagnostics explicitly state that saved-session permissions are not unified. Diagnostics contain no credentials or task text. External MCP services are not isolated by these settings. Custom executables/wrappers must honor native arguments and configuration; overriding the executable is not proof of enforcement.
+
+The policy targets macOS, Linux and Windows through each provider's supported backends; launcher support does not prove sandbox availability. Hermetic tests verify configuration and refusal behavior, not real CLI isolation. Real CLI checks remain opt-in: use a disposable workspace to check internal/external writes, shell networking, web tools and resumed sessions, recording the OS, CLI version and observed result. Unrun platforms and capabilities remain unverified.
 
 ## Configuration
 

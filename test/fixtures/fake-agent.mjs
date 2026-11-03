@@ -1,6 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { spawn } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 
 const mode = process.env.FAKE_ACP_MODE ?? "normal";
@@ -22,6 +23,12 @@ if (mode === "malformed") {
       log(`client:${JSON.stringify(ctx.params.clientInfo)}`);
       log(`argv:${JSON.stringify(process.argv.slice(2))}`);
       log(`delegated:${process.env.AGENT_RELAY_DELEGATED ?? ""}`);
+      if (isCursor) {
+        const configPath = join(process.env.CURSOR_CONFIG_DIR, "cli-config.json");
+        log(`cursor-config-dir:${process.env.CURSOR_CONFIG_DIR}`);
+        log(`cursor-config:${readFileSync(configPath, "utf8").trim()}`);
+        if (process.env.FAKE_CURSOR_CONFIG_MUTATE === "1") writeFileSync(configPath, "{}");
+      }
       return {
         protocolVersion: 1,
         agentCapabilities: { loadSession: mode !== "no-load" },

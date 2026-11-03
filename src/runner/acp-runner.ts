@@ -12,7 +12,7 @@ import {
   type ProcessTreeController,
   type TerminationReport,
 } from "./process-tree.js";
-import type { ProgressReporter, ProviderAdapter } from "./types.js";
+import type { PreparedSpawn, ProgressReporter, ProviderAdapter } from "./types.js";
 
 import {
   assertRunnerAccepting,
@@ -63,6 +63,7 @@ export class AcpRunner<I extends DelegateInput, R extends RelayResult> {
     let sessionActive = false;
     let child: ChildProcessWithoutNullStreams | undefined;
     let processTree: ProcessTreeController | undefined;
+    let preparedSpawn: PreparedSpawn | undefined;
     let clientContext: acp.ClientContext | undefined;
     const worker: { state: "not-attempted" | "pending" | "created" | "failed" } = { state: "not-attempted" };
     let active: ActiveChild | undefined;
@@ -177,6 +178,11 @@ export class AcpRunner<I extends DelegateInput, R extends RelayResult> {
       if (totalAbort.signal.aborted) abortFailure(totalAbort.signal);
       const invocation = this.adapter.command(input, record);
       const childEnv = { ...process.env, AGENT_RELAY_DELEGATED: "1" };
+      const spawnEnv = this.adapter.spawnEnv ? this.adapter.spawnEnv(childEnv) : childEnv;
+      preparedSpawn = await this.adapter.prepareSpawn?.(input, spawnEnv);
+      if (totalAbort.signal.aborted) abortFailure(totalAbort.signal);
+      const warning = this.adapter.permissionWarning?.(input);
+      if (warning) process.stderr.write(`[agent-relay] ${boundedString(warning, 1_024)}\n`);
       try { await lease.markSpawning(); } catch (error) {
         const failure = asLeaseFailure(error, "Cannot persist spawning workspace lease state");
         leaseErrors.push(failure);
@@ -185,9 +191,9 @@ export class AcpRunner<I extends DelegateInput, R extends RelayResult> {
       if (totalAbort.signal.aborted) abortFailure(totalAbort.signal);
       worker.state = "pending";
       try {
-        child = spawn(invocation.command, invocation.args, {
+        child = spawn(invocation.command, [...invocation.args, ...(preparedSpawn?.extraArgs ?? [])], {
           cwd,
-          env: this.adapter.spawnEnv ? this.adapter.spawnEnv(childEnv) : childEnv,
+          env: preparedSpawn?.env ?? spawnEnv,
           shell: false,
           stdio: ["pipe", "pipe", "pipe"],
           ...processTreeSpawnOptions(),
@@ -457,6 +463,12 @@ export class AcpRunner<I extends DelegateInput, R extends RelayResult> {
         }
         const noWorkerCreated = worker.state === "not-attempted" || worker.state === "failed";
         const cleanupConfirmed = noWorkerCreated || cleanupReport?.confirmed === true;
+        if (cleanupConfirmed) {
+          try { await preparedSpawn?.dispose(); } catch {
+            hasUnexpectedCleanupError = true;
+            unexpectedCleanupError = new Error("Cannot remove native permission configuration");
+          }
+        }
         if (lease && cleanupConfirmed) {
           let reaped = false;
           try {

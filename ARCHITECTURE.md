@@ -61,6 +61,7 @@ A public tool-contract change normally begins here and must stay synchronized wi
 3. Acquire the per-`cwd` workspace lock.
 4. Load persisted session metadata when a `sessionId` is supplied.
 5. Ask the adapter how to spawn the provider CLI and construct the child environment.
+   The optional `prepareSpawn` hook creates private native configuration and extra arguments before marking the lease as spawning. Its disposer runs only after confirming no worker exists or the process tree has exited; unconfirmed workers retain their configuration.
 6. Connect ACP over NDJSON on the child's stdin/stdout.
 7. Initialize and, when required, authenticate.
 8. Let the adapter validate initialized capabilities, then create, load, or resume a session.
@@ -185,7 +186,9 @@ Important consequences:
 | Existing session | common load behavior | common load behavior with persisted mode/model checks | prefers ACP resume, falls back to load; `resume: false` forces load | resume only when advertised; never load or fall back to new |
 | Successful completion | process cleanup | process cleanup | process cleanup | requires advertised `session/close`; waits for close before reporting success |
 | Interactive questions | not supported | question requests are skipped; plan approval rejected | V1 question permission denied in child env; V2 ACP cancels questions without client form support | noninteractive prompt prefix only |
-| Permission request | unexpected -> fail/cancel | reject once when possible and fail with structured summary | allow once when offered; otherwise fail | reject once when offered; never allow; fail with PERMISSION_REQUIRED. Refuses automatic approvals, not hard isolation |
+| Permission request | unexpected -> fail/cancel | reject once when possible and fail with structured summary | reject once when possible, otherwise cancel; fail with PERMISSION_REQUIRED; never auto-allow | reject once when offered; never allow; fail with PERMISSION_REQUIRED |
+| Native file policy | workspace sandbox, including Grok state/temp writes | enabled workspace sandbox with explicit cwd | V1 external-directory permissions denied; no OS sandbox or V2 permission translation | workspace-write defaults for fresh sessions; saved modes survive resume |
+| Native web policy | web search/fetch disabled; child networking allowed | WebFetch denied, user-config-only network rules; custom allowlists apply | V1 webfetch/websearch denied; V2 configuration still applies; shell networking remains possible | web tools disabled; file sandbox does not govern networking |
 | Provider summaries | plain text result | tool calls, todos, subagents, interactions, images | usage and tool-call summaries | usage and tool-call summaries |
 
 This table describes current implementation, not a requirement that every future provider behave identically.
@@ -195,6 +198,10 @@ This table describes current implementation, not a requirement that every future
 Delegated execution must not stall waiting for a human UI. Each provider adapter translates its available permission model into deterministic relay behavior.
 
 The generic runner treats permission state as part of task failure handling so that cancellation, partial output, and cleanup use the same path as other execution failures. Do not add an unbounded user-question wait loop to the runner.
+
+Cursor prepares a private CLI config snapshot; DSH writes a bundled native patch into a private task directory and appends `--patch`. The generic runner owns disposal after confirmed process cleanup and reports disposal failures through cleanup diagnostics. Preparation failure never falls back to unrestricted execution. User configuration, provider session logs, and the session-record format are unchanged. Each ACP adapter emits a bounded static stderr policy warning; DSH resume warnings state that ACP cannot verify saved sandbox mode. These settings express native policy, not uniform OS/network isolation; external MCP services remain outside the boundary.
+
+Native Codex also disables built-in web search in thread start/resume configuration. Its per-turn sandbox network denial remains separate from model/API traffic.
 
 ## Limits and backpressure
 

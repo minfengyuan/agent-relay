@@ -72,8 +72,9 @@ export function clearDelegatedEnv(): void {
 }
 
 export function useRunnerCleanup(dirs: string[]): void {
-  beforeEach(() => {
+  beforeEach(async () => {
     clearDelegatedEnv();
+    vi.stubEnv("CURSOR_CONFIG_DIR", await tempDir(dirs, "cursor-source-"));
   });
   afterEach(async () => {
     vi.unstubAllEnvs();

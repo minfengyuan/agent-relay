@@ -57,6 +57,7 @@ When changing an existing adapter, walk through the contract in this order:
 ### Grok
 
 - Default command comes from `RelayConfig.command` (`grok` by default) with relay-owned safety/noninteractive arguments.
+- Keep `--sandbox workspace`, disabled web search/fetch and explicit web deny rules. Workspace permits Grok state/temp writes and child networking; emit the bounded policy warning without claiming complete network isolation.
 - Authentication prefers `xai.api_key` only when `XAI_API_KEY` exists and the method is advertised; otherwise it uses advertised `cached_token`.
 - A permission request is unexpected because the CLI is launched with always-approve semantics; fail rather than inventing an interactive flow.
 - No provider-specific structured summary is currently returned beyond the common text/session result.
@@ -64,7 +65,7 @@ When changing an existing adapter, walk through the contract in this order:
 ### Cursor
 
 - `AGENT_RELAY_CURSOR_COMMAND` is required; do not silently guess an executable path.
-- The CLI is launched with sandboxing enabled.
+- The CLI is launched with sandboxing enabled and an explicit workspace. A private CLI config snapshot forces allowlist approvals, user-config-only network rules, and a WebFetch deny; preserve unrelated config and normal credential/data discovery.
 - Mode defaults to `agent`; `ask` and `model` are session-stable and persisted in the session record.
 - Resuming with conflicting mode/model must fail with `SESSION_OPTION_CONFLICT`.
 - Interactive question requests are skipped and plan approvals are rejected because delegated execution has no UI.
@@ -74,22 +75,23 @@ When changing an existing adapter, walk through the contract in this order:
 ### OpenCode
 
 - Command defaults to `opencode` and launches `acp` without `--cwd`, which V2 rejects. The child working directory and ACP new/load/resume requests carry the requested `cwd`; this also supports V1.
-- Preserve any existing `OPENCODE_PERMISSION` object while forcing `question: "deny"` for V1 compatibility. Do not translate it into V2 permission rules.
+- Preserve any existing `OPENCODE_PERMISSION` object while forcing `question`, `external_directory`, `webfetch`, and `websearch` to `"deny"` for V1 compatibility. Do not translate it into V2 permission rules. This is a native permission policy, not OS isolation; V2's own permission configuration still applies.
 - Do not advertise terminal authentication or question/elicitation capabilities. V2 ACP cancels questions that cannot be shown; keep real question-tool coverage separate from fake-agent assertions.
 - `resume` without `sessionId` is invalid.
 - Existing sessions prefer ACP resume when available, then load; `resume: false` explicitly requires load support.
 - `model`, `effort`, and `agent` map to advertised session config options and must be validated against available values before setting.
-- An ACP permission may be accepted only through an offered `allow_once`; otherwise fail deterministically.
+- Reject ACP permission requests through `reject_once` when offered, otherwise cancel, and fail with `PERMISSION_REQUIRED`. Never select `allow_once` or `allow_always`.
 - Usage/tool-call summaries must remain bounded through `OpenCodeSummaries` (`StandardSummaries` with provider `"opencode"`).
 
 ### DSH
 
-- Command defaults to `dsh` with args `--profile acp`. `AGENT_RELAY_DSH_COMMAND` may override the executable; `dshCommandArgs` is a complete test override with no args env. On Windows, resolve that executable in this adapter under `shell: false`: PATH/PATHEXT lookup, native `.exe`/`.com`, direct `.js`/`.mjs` via `process.execPath`, and conservative parsing of known npm/pnpm `.cmd` shims to `@deepseek-ai/dsh/lib/bin.js` after `bin.dsh` verification. Do not spawn `cmd.exe` or set `shell: true`.
+- Command defaults to `dsh` with args `--profile acp`. `AGENT_RELAY_DSH_COMMAND` may override the executable; `dshCommandArgs` replaces base args with no args env. Preparation always appends the relay-owned native `--patch` for workspace-write defaults, ask approvals, and disabled web tools. Set `DSH_PERMISSION_MODE` only in the child environment. On Windows, resolve that executable in this adapter under `shell: false`: PATH/PATHEXT lookup, native `.exe`/`.com`, direct `.js`/`.mjs` via `process.execPath`, and conservative parsing of known npm/pnpm `.cmd` shims to `@deepseek-ai/dsh/lib/bin.js` after `bin.dsh` verification. Do not spawn `cmd.exe` or set `shell: true`.
 - Do not send an authenticate request. Advertised client capabilities are empty.
 - Existing sessions use ACP resume only when `hasResumeCapability` is present; otherwise fail with `RESUME_UNSUPPORTED`. Never load or create a replacement session.
 - `model` and `reasoningEffort` map to advertised `model` and `reasoning_effort` config options. Refresh `configOptions` after each set. Missing options are `CONFIG_UNSUPPORTED`; invalid values are `INVALID_CONFIG`.
 - Permission requests are refused: select `reject_once` when offered, otherwise cancel, and fail with `PERMISSION_REQUIRED`. Never select `allow_once` or `allow_always`. The relay refuses automatic approvals; saved DSH sessions and deployment config still apply, and this is not hard filesystem/network isolation.
 - Usage/tool-call summaries use `StandardSummaries` with an explicit `"dsh"` provider.
+- Saved sandbox modes survive resume and cannot be verified/reset through current ACP; emit the explicit resume warning. The native file sandbox does not disable shell networking.
 
 ## Adding a provider
 

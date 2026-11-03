@@ -1,4 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { RelayConfig } from "../config.js";
 import type { SessionStore } from "../store.js";
 import { RelayFailure, type DshDelegateInput, type DshRelayResult } from "../types.js";
@@ -14,6 +16,8 @@ import { boundedString, withTimeout } from "../runner/limits.js";
 import { StandardSummaries } from "../runner/summaries.js";
 import type { ProgressReporter, ProviderAdapter } from "../runner/types.js";
 import { resolveWindowsDshLauncher } from "./dsh-windows-command.js";
+import { prepareNativeConfig } from "./native-config.js";
+import { dshPolicyPatch } from "./dsh-policy.js";
 
 export { resolveWindowsDshLauncher };
 
@@ -35,6 +39,17 @@ function dshAdapter(config: RelayConfig): ProviderAdapter<DshDelegateInput, DshR
     command() {
       return dshSpawnSpec(config);
     },
+    prepareSpawn: (_input, env) => prepareNativeConfig(config.stateDir, "dsh", async (directory) => {
+      const patchPath = join(directory, "permissions.patch.yml");
+      await writeFile(patchPath, dshPolicyPatch, { mode: 0o600 });
+      return {
+        env: { ...env, DSH_PERMISSION_MODE: "workspace-write" },
+        extraArgs: ["--patch", patchPath],
+      };
+    }),
+    permissionWarning: (input) => input.sessionId
+      ? "DSH resumed-session permissions are not unified: saved sandbox mode is preserved and cannot be verified through ACP. Built-in web tools are disabled, but shell network access remains available."
+      : "DSH defaults to workspace-write and disables built-in web tools; its file sandbox does not restrict shell network access. External MCP services still apply.",
     authenticate() {
       return undefined;
     },

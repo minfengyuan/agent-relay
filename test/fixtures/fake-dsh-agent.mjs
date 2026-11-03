@@ -1,6 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { spawn } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { Readable, Writable } from "node:stream";
 
 const mode = process.env.FAKE_ACP_MODE ?? "normal";
@@ -25,6 +25,11 @@ if (mode === "malformed") {
       log(`argv:${JSON.stringify(process.argv.slice(1))}`);
       log(`process-cwd:${process.cwd()}`);
       log(`delegated:${process.env.AGENT_RELAY_DELEGATED ?? ""}`);
+      const patchIndex = process.argv.lastIndexOf("--patch");
+      if (patchIndex >= 0) {
+        log(`policy-patch:${JSON.stringify(readFileSync(process.argv[patchIndex + 1], "utf8"))}`);
+        log(`policy-mode:${process.env.DSH_PERMISSION_MODE}`);
+      }
       const resume = mode !== "no-resume";
       return {
         protocolVersion: 1,

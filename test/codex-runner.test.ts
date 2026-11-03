@@ -38,11 +38,13 @@ describe("CodexRunner", () => {
     const all = await events();
     expect(all.filter((event) => event.startup).every((event) => event.delegated === "1")).toBe(true);
     expect(all.filter((event) => event.method === "thread/start")).toHaveLength(1);
-    expect(all.find((event) => event.method === "thread/start").params).toMatchObject({ cwd, model: "model-a", sandbox: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "user", ephemeral: false });
-    expect(all.find((event) => event.method === "thread/resume").params).toMatchObject({ threadId: first.sessionId, excludeTurns: true, cwd, approvalsReviewer: "user" });
+    const policy = { sandbox: "workspace-write", config: { "sandbox_workspace_write.network_access": false, web_search: "disabled" } };
+    expect(all.find((event) => event.method === "thread/start").params).toMatchObject({ cwd, model: "model-a", ...policy, approvalPolicy: "on-request", approvalsReviewer: "user", ephemeral: false });
+    expect(all.find((event) => event.method === "thread/resume").params).toMatchObject({ threadId: first.sessionId, excludeTurns: true, cwd, ...policy, approvalsReviewer: "user" });
     const starts = all.filter((event) => event.method === "turn/start").map((event) => event.params);
     expect(starts[0]).toMatchObject({ model: "model-a", effort: "high", sandboxPolicy: { type: "workspaceWrite", writableRoots: [cwd], networkAccess: false, excludeSlashTmp: false, excludeTmpdirEnvVar: false } });
     expect(starts[1]).not.toHaveProperty("model"); expect(starts[1]).not.toHaveProperty("effort");
+    expect(starts[1]).toMatchObject({ sandboxPolicy: { type: "workspaceWrite", writableRoots: [cwd], networkAccess: false } });
     await unlocked();
   });
 

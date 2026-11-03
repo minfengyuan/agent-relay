@@ -13,6 +13,7 @@ import { authMethodIds, cancelledPermission } from "../runner/helpers.js";
 import { boundedString, jsonSize, withTimeout } from "../runner/limits.js";
 import { CursorSummaries, cursorSummarizer, permissionSummary } from "../runner/summaries.js";
 import type { ProgressReporter, ProviderAdapter } from "../runner/types.js";
+import { prepareCursorConfig } from "./cursor-config.js";
 
 const todoStatus = z.enum(["pending", "in_progress", "completed", "cancelled"]);
 const askQuestionRequest = z.object({
@@ -68,7 +69,7 @@ function cursorAdapter(config: RelayConfig): ProviderAdapter<CursorDelegateInput
         throw new RelayFailure("CURSOR_COMMAND_REQUIRED", "AGENT_RELAY_CURSOR_COMMAND must name the Cursor CLI executable");
       }
       const metadata = this.sessionMetadata(input, record);
-      const args = [...(config.cursorCommandArgs ?? []), "--sandbox", "enabled"];
+      const args = [...(config.cursorCommandArgs ?? []), "--sandbox", "enabled", "--workspace", input.cwd];
       if (metadata.model) args.push("--model", metadata.model);
       if (metadata.mode === "ask") args.push("--mode", "ask");
       args.push("acp");
@@ -81,6 +82,8 @@ function cursorAdapter(config: RelayConfig): ProviderAdapter<CursorDelegateInput
       return "cursor_login";
     },
     capabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+    prepareSpawn: (input, env) => prepareCursorConfig(config.stateDir, input.cwd, env),
+    permissionWarning: () => "Cursor uses workspace sandboxing and user-config-only network rules; custom network allowlists and external MCP services still apply.",
     prompt: (task) => `Work non-interactively. Resolve minor ambiguity conservatively. If a major decision is required, stop and report it.\n\n${task}`,
     sessionMetadata(input, record) {
       if (record && record.mode === undefined) {
