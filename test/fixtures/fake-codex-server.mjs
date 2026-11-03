@@ -41,7 +41,6 @@ function events(task) {
     send({ id: "permission-1", method: actions[task], params: { threadId, turnId } });
     return;
   }
-  if (task === "malformed") { process.stdout.write("not-json\n"); return; }
   if (task === "oversized") { process.stdout.write("x".repeat(8 * 1024 * 1024 + 1)); return; }
   if (task === "exit") { process.exit(3); }
   if (task === "large") {
@@ -84,6 +83,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     currentTask = params.input[0].text.split("\n\n").at(-1);
     log({ prompt: currentTask });
     if (currentTask === "start-hang") return;
+    if (currentTask === "malformed") {
+      process.stdout.write([
+        JSON.stringify({ id: message.id, result: { turn: { id: turnId, status: "inProgress" } } }),
+        JSON.stringify({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-1", delta: "hello " } }),
+        "not-json\n",
+      ].join("\n"));
+      return;
+    }
     if (currentTask === "early") events(currentTask);
     reply({ turn: { id: turnId, status: "inProgress" } });
     if (currentTask !== "early") events(currentTask);
