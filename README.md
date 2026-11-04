@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Run **Grok**, **Cursor**, **OpenCode**, **DSH**, and **Codex** through one local MCP server from any MCP client that supports stdio.
+Run **Grok**, **Cursor**, **OpenCode**, **DSH**, **Codex**, and **Claude Code** through one local MCP server from any MCP client that supports stdio.
 
 `agent-relay` bridges MCP tool calls to local coding agents through ACP or the native Codex app-server. The calling client handles orchestration and review; the relay runs one non-interactive agent turn and returns bounded output together with a resumable session ID.
 
@@ -23,6 +23,7 @@ Run **Grok**, **Cursor**, **OpenCode**, **DSH**, and **Codex** through one local
 | OpenCode | `opencode_delegate` | Coding tasks with optional model/effort/agent selection |
 | DSH | `dsh_delegate` | Coding tasks through DeepSeek Harness |
 | Codex | `codex_delegate` | Coding tasks through the native Codex app-server |
+| Claude Code | `claude_delegate` | Coding tasks through the Claude Agent ACP bridge |
 
 ## Quick start
 
@@ -68,7 +69,7 @@ For clients using an `mcpServers` JSON configuration, the following is an exampl
 }
 ```
 
-Cursor requires an explicit executable path. Grok, OpenCode, DSH, and Codex default to `grok`, `opencode`, `dsh`, and `codex` on PATH. You only need to install and authenticate the agents you intend to call.
+Cursor requires an explicit executable path. Grok, OpenCode, DSH, Codex, and Claude Code default to `grok`, `opencode`, `dsh`, `codex`, and `claude-agent-acp` on PATH. You only need to install and authenticate the agents you intend to call. Claude Code requires the separate ACP bridge described below.
 
 The relay uses stdio, with stdout reserved for MCP messages. Tasks default to a one-hour total timeout. Set the client's tool-call timeout to at least 3660 seconds when available, and keep it above any custom relay total timeout. Client timeout and progress settings are client-specific.
 
@@ -91,7 +92,7 @@ AGENT_RELAY_CURSOR_COMMAND = "/ABSOLUTE/PATH/TO/cursor-agent"
 pnpm setup:instructions
 ```
 
-The command detects **Codex, Cursor, OpenCode, Grok, and DSH**, shows the evidence and rule destinations, then lets you select multiple clients by number. Press Enter to select all detected clients, or `q` to cancel. Detection uses commands on PATH and existing client configuration directories; it does not launch clients or verify authentication or MCP registration. Undetected clients can also be selected explicitly.
+The command detects **Codex, Cursor, OpenCode, Grok, DSH, and Claude Code**, shows the evidence and rule destinations, then lets you select multiple clients by number. Press Enter to select all detected clients, or `q` to cancel. Detection uses commands on PATH and existing client configuration directories; it does not launch clients or verify authentication or MCP registration. Undetected clients can also be selected explicitly.
 
 | Client | Rule destination | Scope |
 | --- | --- | --- |
@@ -100,6 +101,7 @@ The command detects **Codex, Cursor, OpenCode, Grok, and DSH**, shows the eviden
 | OpenCode | `$OPENCODE_CONFIG_DIR/AGENTS.md` when set; otherwise `$XDG_CONFIG_HOME/opencode/AGENTS.md`, default `~/.config/opencode/AGENTS.md` | Global |
 | Grok | `$GROK_HOME/AGENTS.md`, default `~/.grok/AGENTS.md` | Global |
 | DSH | `$DSH_HOME/AGENTS.md`, default `~/.dsh/AGENTS.md` | Global |
+| Claude Code | `$CLAUDE_CONFIG_DIR/CLAUDE.md`, default `~/.claude/CLAUDE.md` | Global |
 
 Cursor requires an existing project directory, requested interactively if omitted. Its rule applies only to that project; global User Rules remain managed through Cursor's settings. Other clients use their own global instruction files. Environment overrides must match those used to launch the corresponding client.
 
@@ -107,6 +109,7 @@ For scripts or non-interactive terminals, pass comma-separated client IDs:
 
 ```bash
 pnpm setup:instructions --clients codex,opencode,grok,dsh
+pnpm setup:instructions --clients claude
 pnpm setup:instructions --clients codex,cursor --project /absolute/project
 pnpm setup:instructions --clients codex,cursor --project /absolute/project --dry-run
 pnpm setup:instructions --help
@@ -136,16 +139,18 @@ Delegate this implementation task to OpenCode in /path/to/worktree.
 Delegate this implementation task to DSH in /path/to/worktree.
 
 Delegate this implementation task to Codex in /path/to/worktree.
+
+Delegate this implementation task to Claude Code in /path/to/worktree.
 ```
 
-Each tool takes a `task` and an absolute `cwd`. Pass a returned `sessionId` to the same tool with the same working directory to continue that provider's session. Optional provider-specific inputs are exposed through MCP tool discovery; the four existing ACP tools retain their contracts alongside the new `codex_delegate` tool.
+Each tool takes a `task` and an absolute `cwd`. Pass a returned `sessionId` to the same tool with the same working directory to continue that provider's session. Optional provider-specific inputs are exposed through MCP tool discovery.
 
 ```text
 Calling client chooses a task and worktree
         ↓
 agent-relay executes one provider turn
         ↓
-Grok / Cursor / OpenCode / DSH / Codex works locally
+Grok / Cursor / OpenCode / DSH / Codex / Claude Code works locally
         ↓
 Calling client reviews the result, diff, and tests
         ↓
@@ -203,9 +208,32 @@ Results include `provider: "codex"`, `sessionId`, `stopReason`, `text`, and `tru
 
 Run the opt-in authenticated smoke with `pnpm test:real:codex` (or `RUN_CODEX_REAL_TESTS=1 pnpm exec vitest run test/codex-real-smoke.test.ts`). It uses disposable state/workspaces but the real Codex account and service.
 
+### Claude Code
+
+Install the ACP bridge separately; `@agentclientprotocol/claude-agent-acp@0.100.0` is the integration baseline:
+
+```bash
+npm install -g @agentclientprotocol/claude-agent-acp@0.100.0
+claude-agent-acp --cli auth login
+```
+
+The bridge uses the Claude Agent SDK and its bundled native Claude executable. Existing compatible local authentication or provider environment credentials can be used. To use another native executable, set the upstream `CLAUDE_CODE_EXECUTABLE` to its absolute path. `AGENT_RELAY_CLAUDE_COMMAND` selects the **bridge**, not the native `claude` command. The relay does not install software or start interactive login during delegation.
+
+`claude_delegate` accepts `task`, absolute `cwd`, and optional `sessionId`, `model`, and `effort`. Model/effort values must be advertised `configOptions`; the relay sets model before effort and refreshes options after each change. Omitted options preserve provider state. Invalid or unavailable options return `INVALID_CONFIG` or `CONFIG_UNSUPPORTED`.
+
+Every new or restored session is explicitly set to `acceptEdits` before prompting. Edits can run directly, while additional ACP approval requests are rejected with `PERMISSION_REQUIRED` and available partial output. The relay advertises no terminal authentication, file/terminal services, or elicitation UI; the baseline bridge disables `AskUserQuestion` without form support. Native allow rules, hooks, shell networking and external MCP services still apply. This is not filesystem or network isolation.
+
+Sessions use a separate `claude` namespace and the same cross-provider workspace locks. Only relay-confirmed IDs can be restored from the original `cwd`. Resume is preferred; load is used only when resume is not advertised. A failed restore never creates a replacement session. New IDs are persisted before configuration so configuration errors can return a resumable ID. ACP authentication-required errors return `AUTH_UNAVAILABLE`; sign in outside the relay and retry the confirmed session when available.
+
+The bridge must advertise `session/close`. The relay closes the session, confirms process-tree cleanup, and only then releases the workspace lock. Results include `provider: "claude"` and the common result fields, with optional bounded tool-call and ACP usage summaries.
+
+On Windows, supported npm/pnpm `.cmd` shims are resolved to a verified package `bin.claude-agent-acp` entry and run with Node, without a shell. Native `.exe`/`.com` and explicit `.js`/`.mjs` launchers are also supported. Arbitrary batch scripts are rejected.
+
+Run the opt-in authenticated smoke with `pnpm test:real:claude` (or `RUN_CLAUDE_REAL_TESTS=1 pnpm exec vitest run test/claude-real-smoke.test.ts`). Optional `CLAUDE_TEST_MODEL` and `CLAUDE_TEST_EFFORT` exercise explicit configuration. The smoke uses a disposable workspace, edits files, restores the conversation across processes, and checks lock release. It requires authentication and may consume model allowance; default tests use a fake bridge.
+
 ### Native permission policy
 
-The relay applies workspace-write settings and disables known web tools through each CLI's native controls. These controls are not equivalent across providers. Extra ACP/native approval requests are refused; Grok's unexpected requests fail instead of opening an interactive approval flow.
+The relay applies provider-specific native permission controls. These controls are not equivalent across providers. Extra ACP/native approval requests are refused; Grok's unexpected requests fail instead of opening an interactive approval flow.
 
 | Agent | Relay configuration | Remaining limits |
 | --- | --- | --- |
@@ -214,6 +242,7 @@ The relay applies workspace-write settings and disables known web tools through 
 | Cursor | `--sandbox enabled --workspace <cwd>`, `approvalMode: allowlist`, `sandbox.networkAccess: user_config_only`, `WebFetch(*)` denied | Custom sandbox network allowlists and local/team policy still apply; this is not a blanket network block |
 | OpenCode | Forces V1 `OPENCODE_PERMISSION` entries `question`, `external_directory`, `webfetch`, and `websearch` to `deny`; refuses extra ACP approvals in both versions | No V2 permission translation; V2's own configuration still applies. No OS sandbox: shell, plugins and external MCP tools can write outside the workspace or use the network. V1 external-directory denial also restricts supported external reads |
 | DSH | Native `--patch` sets sandbox mode and new-session default preset to `workspace-write`, approval to `ask`, and disables `web_search`/`web_fetch` | The file sandbox does not restrict shell networking. Resumed sessions retain saved sandbox mode; ACP cannot verify or reset it. Windows ACL and older Linux Landlock backends may provide partial file enforcement |
+| Claude Code | Sets `acceptEdits` on new/restored sessions and rejects extra ACP approvals | No filesystem or network isolation; native allow rules, hooks, shell networking and external MCP services still apply |
 
 **OpenCode behavior change:** permission requests are no longer automatically granted with `allow_once`. The relay selects `reject_once` when offered, otherwise cancels, and returns `PERMISSION_REQUIRED` with available partial output.
 
@@ -221,7 +250,7 @@ Cursor uses a private snapshot of its CLI configuration under the relay state di
 
 DSH receives a private file containing the relay's bundled native patch, appended after other launch arguments. User profiles are not edited; `DSH_PERMISSION_MODE` is set only in the child environment. Native configuration files are removed after confirmed process cleanup, including startup failure, cancellation and timeout; they are retained if cleanup cannot be confirmed. Preparation errors fail structurally without an unrestricted retry. A process crash may leave private directories behind; remove them only after confirming no worker still uses them.
 
-Grok, Cursor, OpenCode and DSH emit one bounded stderr diagnostic per execution describing policy limits. DSH resume diagnostics explicitly state that saved-session permissions are not unified. Diagnostics contain no credentials or task text. External MCP services are not isolated by these settings. Custom executables/wrappers must honor native arguments and configuration; overriding the executable is not proof of enforcement.
+Grok, Cursor, OpenCode, DSH and Claude Code emit one bounded stderr diagnostic per execution describing policy limits. DSH resume diagnostics explicitly state that saved-session permissions are not unified. Diagnostics contain no credentials or task text. External MCP services are not isolated by these settings. Custom executables/wrappers must honor native arguments and configuration; overriding the executable is not proof of enforcement.
 
 The policy targets macOS, Linux and Windows through each provider's supported backends; launcher support does not prove sandbox availability. Hermetic tests verify configuration and refusal behavior, not real CLI isolation. Real CLI checks remain opt-in: use a disposable workspace to check internal/external writes, shell networking, web tools and resumed sessions, recording the OS, CLI version and observed result. Unrun platforms and capabilities remain unverified.
 
@@ -236,6 +265,7 @@ Set these environment variables on the MCP server process:
 | `AGENT_RELAY_OPENCODE_COMMAND` | `opencode` | OpenCode executable |
 | `AGENT_RELAY_DSH_COMMAND` | `dsh` | DSH executable |
 | `AGENT_RELAY_CODEX_COMMAND` | `codex` | Native Codex executable |
+| `AGENT_RELAY_CLAUDE_COMMAND` | `claude-agent-acp` | Claude ACP bridge executable |
 | `AGENT_RELAY_STATE_DIR` | `~/.local/agent-relay` | Session metadata and workspace locks |
 | `AGENT_RELAY_PHASE_TIMEOUT_MS` | `30000` | Protocol phase timeout |
 | `AGENT_RELAY_TOTAL_TIMEOUT_MS` | `3600000` | Total task timeout |

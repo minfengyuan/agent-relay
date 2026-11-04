@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { cleanupAllChildren, CodexRunner } from "../src/runner.js";
+import { cleanupAllChildren, ClaudeRunner, CodexRunner } from "../src/runner.js";
 import { createRelayServer } from "../src/server.js";
 import { RelayFailure } from "../src/types.js";
 import { SessionStore } from "../src/store.js";
-import { clearDelegatedEnv, codexFixture, dshFixture, grokFixture, opencodeFixture, waitForLog } from "./helpers.js";
+import { claudeFixture, clearDelegatedEnv, codexFixture, dshFixture, grokFixture, opencodeFixture, waitForLog } from "./helpers.js";
 
 const dirs: string[] = [];
 beforeEach(() => {
@@ -66,7 +66,7 @@ describe("MCP server", () => {
     try {
       expect(init).toHaveProperty("result.serverInfo.name", "agent-relay");
       const discovery = await request(2, "tools/list") as { result?: { tools?: unknown[] } };
-      expect(discovery.result?.tools).toHaveLength(5);
+      expect(discovery.result?.tools).toHaveLength(6);
       const response = await request(3, "tools/call", {
         name: "grok_delegate", arguments: { task: "hello", cwd: process.cwd() },
       }) as { result?: { isError?: boolean; content?: Array<{ text?: string }>; structuredContent?: unknown } };
@@ -92,7 +92,7 @@ describe("MCP server", () => {
       } finally { await clientTransport.close(); await server.close(); }
     },
   );
-  it("discovers all five providers with their input contracts", async () => {
+  it("discovers all six providers with their input contracts", async () => {
     const { server, clientTransport, request, init } = await harness();
     expect(init).toHaveProperty("result.serverInfo.name", "agent-relay");
     const response = await request(2, "tools/list");
@@ -120,8 +120,74 @@ describe("MCP server", () => {
     expect(response).toHaveProperty("result.tools.4.inputSchema.properties.reasoningEffort");
     expect(response).not.toHaveProperty("result.tools.4.inputSchema.properties.resume");
     expect(response).toHaveProperty("result.tools.4.outputSchema.properties.provider.const", "codex");
+    expect(response).toHaveProperty("result.tools.5.name", "claude_delegate");
+    expect(response).toHaveProperty("result.tools.5.inputSchema.required", ["task", "cwd"]);
+    expect(response).toHaveProperty("result.tools.5.inputSchema.properties.model");
+    expect(response).toHaveProperty("result.tools.5.inputSchema.properties.effort");
+    expect(response).not.toHaveProperty("result.tools.5.inputSchema.properties.permissionMode");
+    expect(response).toHaveProperty("result.tools.5.outputSchema.properties.provider.const", "claude");
     await clientTransport.close();
     await server.close();
+  });
+
+  it("forwards Claude options, progress, partial errors, and cancellation", async () => {
+    const cwd = await realpath(await mkdtemp(join(tmpdir(), "relay-server-claude-")));
+    dirs.push(cwd);
+    const { server, clientTransport, request, notify, notifications, stateDir } = await harness({
+      claudeCommand: process.execPath, claudeCommandArgs: [claudeFixture], cancelGraceMs: 100, progressIntervalMs: 1,
+    });
+    const log = join(stateDir, "claude.log");
+    vi.stubEnv("FAKE_ACP_LOG", log);
+    type Response = { result?: { isError?: boolean; content?: Array<{ text: string }>; structuredContent?: Record<string, unknown> } };
+    const call = async (id: number, args: Record<string, unknown>) => {
+      const response = await request(id, "tools/call", {
+        name: "claude_delegate", arguments: { cwd, ...args }, _meta: { progressToken: 73 },
+      }) as Response;
+      expect(JSON.parse(response.result?.content?.[0]?.text ?? "null")).toEqual(response.result?.structuredContent);
+      return response;
+    };
+    try {
+      const created = await call(3, { task: "hello", model: "sonnet", effort: "high" });
+      expect(created.result?.isError).not.toBe(true);
+      expect(created.result?.structuredContent).toMatchObject({ provider: "claude", text: "fresh answer", usage: { used: 42 } });
+      expect(await readFile(log, "utf8")).toContain("set:model:sonnet\nset:effort:high\nset:mode:acceptEdits");
+      expect(notifications).toContainEqual(expect.objectContaining({
+        method: "notifications/progress", params: expect.objectContaining({ progressToken: 73 }),
+      }));
+      const sessionId = created.result?.structuredContent?.sessionId;
+      expect((await call(4, { task: "again", sessionId })).result?.structuredContent).toMatchObject({ sessionId });
+      for (const [requestId, args, code] of [
+        [5, { task: "hello", sessionId: "unknown" }, "UNKNOWN_SESSION"],
+        [6, { task: "hello", cwd: "relative", sessionId }, "INVALID_CWD"],
+      ] as const) {
+        expect((await call(requestId, args)).result?.structuredContent).toMatchObject({
+          provider: "claude", sessionId: null, error: { code },
+        });
+      }
+      vi.stubEnv("FAKE_ACP_MODE", "permission");
+      const rejected = await call(7, { task: "hello", sessionId });
+      expect(rejected.result?.isError).toBe(true);
+      expect(rejected.result?.structuredContent).toMatchObject({
+        provider: "claude", sessionId, text: "fresh answer",
+        toolCalls: [{ toolCallId: "tool-1", title: "Fake tool", status: "completed" }],
+        usage: { used: 42 }, error: { code: "PERMISSION_REQUIRED" },
+      });
+      vi.stubEnv("FAKE_ACP_LOG", join(stateDir, "cancel.log"));
+      vi.stubEnv("FAKE_ACP_MODE", "hang");
+      const delegate = vi.spyOn(ClaudeRunner.prototype, "delegate");
+      void call(8, { task: "hang", sessionId });
+      await waitForLog(join(stateDir, "cancel.log"), "prompt:claude-session");
+      const outcome = (delegate.mock.results[0]?.value as Promise<unknown>).catch((error: unknown) => error);
+      await notify("notifications/cancelled", { requestId: 8, reason: "test" });
+      expect(await outcome).toMatchObject({ code: "CANCELLED", partial: { provider: "claude", sessionId } });
+      await waitForLog(join(stateDir, "cancel.log"), "cancel:claude-session");
+      const lease = await new SessionStore(stateDir).acquire(cwd);
+      await lease.markReaped("no-worker-created");
+      await lease.release();
+    } finally {
+      await clientTransport.close();
+      await server.close();
+    }
   });
 
   it("forwards native Codex options, results, progress, errors, and MCP cancellation", async () => {

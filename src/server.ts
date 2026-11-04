@@ -2,10 +2,11 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { RelayConfig } from "./config.js";
 import { SessionStore, resolveCwd } from "./store.js";
-import { CodexRunner, CursorRunner, DshRunner, GrokRunner, OpenCodeRunner, type ProgressReporter } from "./runner.js";
+import { ClaudeRunner, CodexRunner, CursorRunner, DshRunner, GrokRunner, OpenCodeRunner, type ProgressReporter } from "./runner.js";
 import { codexUsageSchema } from "./runner/codex-summaries.js";
 import {
   RelayFailure,
+  type ClaudeRelayResult,
   type CursorRelayResult,
   type CodexRelayResult,
   type DshRelayResult,
@@ -139,6 +140,21 @@ const codexOutputSchema = outputSchema.extend({
   summariesTruncated: z.boolean().optional(),
 });
 
+const claudeInputSchema = z.object({
+  task: z.string().trim().min(1).describe("Task for Claude Code"),
+  cwd: z.string().trim().min(1).describe("Existing absolute working directory"),
+  sessionId: z.string().trim().min(1).optional().describe("Previously returned Claude Code session ID"),
+  model: z.string().trim().min(1).optional().describe("Claude Code model session option"),
+  effort: z.string().trim().min(1).optional().describe("Claude Code effort session option"),
+});
+
+const claudeOutputSchema = outputSchema.extend({
+  provider: z.literal("claude"),
+  toolCalls: toolCallSchema.optional(),
+  usage: usageSchema.optional(),
+  summariesTruncated: z.boolean().optional(),
+});
+
 function toolResult(result: RelayResult, isError = false) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(result) }],
@@ -234,6 +250,7 @@ export function createRelayServer(config: RelayConfig): McpServer {
   const openCodeRunner = new OpenCodeRunner(config, new SessionStore(config.stateDir, "opencode"));
   const dshRunner = new DshRunner(config, new SessionStore(config.stateDir, "dsh"));
   const codexRunner = new CodexRunner(config, new SessionStore(config.stateDir, "codex"));
+  const claudeRunner = new ClaudeRunner(config, new SessionStore(config.stateDir, "claude"));
 
   registerDelegateTool(server, {
     name: "grok_delegate",
@@ -346,6 +363,30 @@ export function createRelayServer(config: RelayConfig): McpServer {
         ? failure.partial : undefined;
       return {
         ...errorFields(failure), provider: "codex",
+        ...(extra?.toolCalls ? { toolCalls: extra.toolCalls } : {}),
+        ...(extra?.usage ? { usage: extra.usage } : {}),
+        ...(extra?.summariesTruncated ? { summariesTruncated: true } : {}),
+      };
+    },
+  });
+
+  registerDelegateTool(server, {
+    name: "claude_delegate",
+    title: "Delegate a task to Claude Code",
+    description: "Runs one Claude Code ACP prompt with acceptEdits and extra approvals refused; optionally restores a saved session. Native allow rules, hooks, shell networking and external MCP services still apply. No filesystem or network isolation.",
+    inputSchema: claudeInputSchema,
+    outputSchema: claudeOutputSchema,
+    run: (input: z.infer<typeof claudeInputSchema>, cwd, signal, progress) => claudeRunner.delegate({
+      task: input.task, cwd,
+      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+      ...(input.model === undefined ? {} : { model: input.model }),
+      ...(input.effort === undefined ? {} : { effort: input.effort }),
+    }, signal, progress),
+    toErrorResult: (failure): ClaudeRelayResult => {
+      const extra = failure.partial && "provider" in failure.partial && failure.partial.provider === "claude"
+        ? failure.partial : undefined;
+      return {
+        ...errorFields(failure), provider: "claude",
         ...(extra?.toolCalls ? { toolCalls: extra.toolCalls } : {}),
         ...(extra?.usage ? { usage: extra.usage } : {}),
         ...(extra?.summariesTruncated ? { summariesTruncated: true } : {}),

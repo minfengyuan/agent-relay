@@ -86,6 +86,13 @@ export type DshRelayResult = RelayResultBase & {
   summariesTruncated?: boolean;
 };
 
+export type ClaudeRelayResult = RelayResultBase & {
+  provider: "claude";
+  toolCalls?: ToolCallSummary[];
+  usage?: UsageSummary;
+  summariesTruncated?: boolean;
+};
+
 export type CodexTokenUsage = {
   totalTokens: number;
   inputTokens: number;
@@ -102,14 +109,15 @@ export type CodexRelayResult = RelayResultBase & {
   summariesTruncated?: boolean;
 };
 
-export type RelayResult = GrokRelayResult | CursorRelayResult | OpenCodeRelayResult | DshRelayResult | CodexRelayResult;
+export type RelayResult = GrokRelayResult | CursorRelayResult | OpenCodeRelayResult | DshRelayResult | CodexRelayResult | ClaudeRelayResult;
 
 export type RelayResultPartial =
   | Partial<GrokRelayResult>
   | Partial<CursorRelayResult>
   | Partial<OpenCodeRelayResult>
   | Partial<DshRelayResult>
-  | Partial<CodexRelayResult>;
+  | Partial<CodexRelayResult>
+  | Partial<ClaudeRelayResult>;
 
 type GrokForbiddenExtras =
   | "provider"
@@ -151,6 +159,11 @@ export type DshDelegateInput = DelegateInput & {
 export type CodexDelegateInput = DelegateInput & {
   model?: string;
   reasoningEffort?: string;
+};
+
+export type ClaudeDelegateInput = DelegateInput & {
+  model?: string;
+  effort?: string;
 };
 
 export type ToolCallSummary = {

@@ -21,7 +21,7 @@ AcpRunner / CodexRunner ── SessionStore
   │ stdin/stdout       └─ per-cwd locks
   ▼
 Provider CLI
-(Grok / Cursor / OpenCode / DSH / Codex)
+(Grok / Cursor / OpenCode / DSH / Codex / Claude Code)
 ```
 
 The relay is an orchestration boundary, not a second autonomous planner. The calling client chooses what to delegate and reviews/integrates the result; the relay executes one non-interactive provider turn and returns a resumable session ID plus bounded output.
@@ -45,7 +45,7 @@ Do not move provider behavior here.
 Responsibilities:
 
 - Define Zod schemas for MCP tool inputs and structured outputs.
-- Register `grok_delegate`, `cursor_delegate`, `opencode_delegate`, `dsh_delegate`, and `codex_delegate`.
+- Register `grok_delegate`, `cursor_delegate`, `opencode_delegate`, `dsh_delegate`, `codex_delegate`, and `claude_delegate`.
 - Resolve and validate `cwd` before execution.
 - Convert runner results and `RelayFailure`s into MCP tool results.
 - Forward MCP cancellation and progress notifications into the runner.
@@ -173,9 +173,9 @@ Important consequences:
 - A returned `sessionId` is provider-specific and must be sent back to the same MCP tool/provider.
 - Results and partial errors expose a `sessionId` only after its relay record has been read or written successfully, so any returned ID is eligible for relay resume from its bound `cwd`.
 - A session is tied to the resolved working directory to prevent accidental continuation in another checkout/worktree.
-- Provider options that must remain stable across a session belong in persisted metadata when necessary. Cursor currently persists model/mode semantics; Grok, OpenCode, and DSH currently do not persist extra adapter metadata.
+- Provider options that must remain stable across a session belong in persisted metadata when necessary. Cursor currently persists model/mode semantics; Grok, OpenCode, DSH, and Claude currently do not persist extra adapter metadata.
 - Provider capability negotiation decides whether an existing session can be resumed or loaded.
-- DSH persists a new relay record before session configuration so validation, setting, timeout, or cancellation failures can return a resumable ID. Other providers keep configuration-before-persistence behavior unless their adapter opts in.
+- DSH and Claude persist a new relay record before session configuration so validation, setting, timeout, or cancellation failures can return a resumable ID. Other providers keep configuration-before-persistence behavior unless their adapter opts in.
 
 ## Provider behavior matrix
 
@@ -192,6 +192,12 @@ Important consequences:
 | Provider summaries | plain text result | tool calls, todos, subagents, interactions, images | usage and tool-call summaries | usage and tool-call summaries |
 
 This table describes current implementation, not a requirement that every future provider behave identically.
+
+Claude Code uses `claude-agent-acp` as a separate executable, keeping its SDK dependencies outside the relay. It negotiates ACP v1, uses existing credentials without `authenticate`, and advertises no terminal/file services or elicitation UI. A structured ACP `authRequired` error maps to `AUTH_UNAVAILABLE` through the adapter's optional `mapError` hook; unrelated failures keep the generic error mapping.
+
+Claude has an isolated session namespace and shared workspace locks. It prefers resume, falls back to load only when resume is not advertised, and never creates a replacement after restore failure. Model and effort use refreshed advertised config options; every new/restored session explicitly sets and verifies mode `acceptEdits` before prompting. Extra permission requests select `reject_once` or cancel and fail with `PERMISSION_REQUIRED`. Native allow rules, hooks, shell networking and external MCP services remain active; this is not OS isolation.
+
+Like DSH, Claude requires `session/close` and uses the shared finalization/cleanup sequence below. Windows npm/pnpm launchers share a conservative parser with DSH, parameterized by package name, bin name and entry path. DSH's resolver export remains compatible; arbitrary batch scripts never execute.
 
 ## Non-interactive permission model
 

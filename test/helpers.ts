@@ -12,6 +12,7 @@ export const cursorFixture = grokFixture;
 export const opencodeFixture = join(fixtures, "fake-opencode-agent.mjs");
 export const dshFixture = join(fixtures, "fake-dsh-agent.mjs");
 export const codexFixture = join(fixtures, "fake-codex-server.mjs");
+export const claudeFixture = join(fixtures, "fake-claude-agent.mjs");
 export const backpressureFixture = join(fixtures, "backpressure-agent.mjs");
 
 export async function tempDir(dirs: string[], prefix = "relay-"): Promise<string> {
@@ -41,6 +42,8 @@ export function baseConfig(stateDir: string, overrides: Partial<RelayConfig> = {
     dshCommandArgs: [dshFixture],
     codexCommand: process.execPath,
     codexCommandArgs: [codexFixture],
+    claudeCommand: process.execPath,
+    claudeCommandArgs: [claudeFixture],
     stateDir,
     phaseTimeoutMs: 2_000,
     totalTimeoutMs: 15_000,

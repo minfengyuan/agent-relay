@@ -12,6 +12,8 @@ export type RelayConfig = {
   dshCommandArgs?: string[];
   codexCommand?: string;
   codexCommandArgs?: string[];
+  claudeCommand?: string;
+  claudeCommandArgs?: string[];
   stateDir: string;
   phaseTimeoutMs: number;
   totalTimeoutMs: number;
@@ -37,6 +39,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayConfig {
     opencodeCommand: env.AGENT_RELAY_OPENCODE_COMMAND?.trim() || "opencode",
     dshCommand: env.AGENT_RELAY_DSH_COMMAND?.trim() || "dsh",
     codexCommand: env.AGENT_RELAY_CODEX_COMMAND?.trim() || "codex",
+    claudeCommand: env.AGENT_RELAY_CLAUDE_COMMAND?.trim() || "claude-agent-acp",
     stateDir: env.AGENT_RELAY_STATE_DIR ?? join(homedir(), ".local", "agent-relay"),
     phaseTimeoutMs: positiveInt(env.AGENT_RELAY_PHASE_TIMEOUT_MS, 30_000),
     totalTimeoutMs: positiveInt(env.AGENT_RELAY_TOTAL_TIMEOUT_MS, 3_600_000),

@@ -18,13 +18,14 @@ const INSTRUCTIONS = `<!-- AGENT-RELAY_START -->
 
 The calling agent owns planning, delegation, review, and integration. External agents execute bounded tasks in the supplied workspace/worktree.
 
-Delegate only to an agent the user explicitly mentions (Grok, Cursor, OpenCode, DSH, or Codex). If the user does not name an agent, the calling agent performs the task itself; do not infer delegation from task type or complexity.
+Delegate only to an agent the user explicitly mentions (Grok, Cursor, OpenCode, DSH, Codex, or Claude Code). If the user does not name an agent, the calling agent performs the task itself; do not infer delegation from task type or complexity.
 
 - Use \`grok_delegate\` for Grok implementation tasks.
 - Use \`cursor_delegate\` for Cursor implementation tasks or focused analysis in \`ask\` mode; an optional \`model\` selects the startup model.
 - Use \`opencode_delegate\` for OpenCode implementation work. Optional \`model\`, \`effort\`, and \`agent\` change the live session configuration; omitted fields keep OpenCode's restored or default state.
 - Use \`dsh_delegate\` for DSH implementation work. Optional \`model\` and \`reasoningEffort\` change the live session configuration; omitted fields keep DSH's restored or default state. Existing sessions resume only when DSH advertises resume; the relay does not load or recreate them.
 - Use \`codex_delegate\` for Codex implementation work through its native app-server. Optional \`model\` and \`reasoningEffort\` change the live thread configuration; omitted fields preserve the restored or default state. Pass the returned \`sessionId\` to resume the same thread.
+- Use \`claude_delegate\` for Claude or Claude Code implementation work through its ACP bridge. Optional \`model\` and \`effort\` select advertised session options; omitted fields preserve the restored or default state. Pass the returned \`sessionId\` with the same \`cwd\` to restore the session.
 
 When delegating:
 
@@ -37,6 +38,7 @@ When delegating:
 - OpenCode's child \`question: deny\` overlay can be overridden by agent-specific rules. The worker is noninteractive and will time out if it waits for a user; this is not hard isolation.
 - DSH permission requests are refused (\`reject_once\` when offered). On PERMISSION_REQUIRED, review the request and coordinate any policy change before resuming; do not retry to bypass the rejection. The relay refuses automatic approvals; it does not provide hard filesystem or network isolation. Saved DSH sessions and deployment configuration still apply.
 - Codex uses workspace-write sandboxing with sandbox network access disabled and default temporary-directory access. Extra permissions are refused with PERMISSION_REQUIRED; interactive questions fail with INTERACTION_REQUIRED. Do not retry to bypass these failures. Local Codex authentication and inherited MCP configuration still apply.
+- Claude Code uses \`acceptEdits\` on new and restored sessions. Extra ACP approvals are refused with PERMISSION_REQUIRED; do not retry to bypass the rejection. Native allow rules, hooks, shell networking, and external MCP services still apply. This is not filesystem or network isolation.
 - Keep this relay out of downstream agents' MCP configuration to avoid recursive delegation.
 <!-- AGENT-RELAY_END -->`;
 
@@ -92,9 +94,10 @@ const CLIENTS = [
   { id: "opencode", name: "OpenCode", commands: ["opencode"] },
   { id: "grok", name: "Grok", commands: ["grok"] },
   { id: "dsh", name: "DSH", commands: ["dsh"] },
+  { id: "claude", name: "Claude Code", commands: ["claude"] },
 ];
 const CURSOR_HEADER = "---\nalwaysApply: true\n---\n\n";
-const HELP = `Usage: pnpm setup:instructions [--clients codex,cursor,opencode,grok,dsh] [--project DIRECTORY] [--dry-run]
+const HELP = `Usage: pnpm setup:instructions [--clients codex,cursor,opencode,grok,dsh,claude] [--project DIRECTORY] [--dry-run]
 
 Without --clients, select clients interactively (Enter selects all detected clients).
 --clients   Comma-separated client IDs; skips interactive selection, including for undetected clients.
@@ -119,6 +122,7 @@ function clientDirectories(home, env) {
       join(configuredDirectory(env.XDG_CONFIG_HOME, join(home, ".config"), home), "opencode"), home),
     grok: configuredDirectory(env.GROK_HOME, join(home, ".grok"), home),
     dsh: configuredDirectory(env.DSH_HOME, join(home, ".dsh"), home),
+    claude: configuredDirectory(env.CLAUDE_CONFIG_DIR, join(home, ".claude"), home),
   };
 }
 
@@ -199,6 +203,7 @@ async function resolveTargets(clients, { home, env, project }) {
       if ((await readIfPresent(override)).trim()) path = override;
     }
     if (id === "cursor") path = join(resolve(project), ".cursor", "rules", "agent-relay.mdc");
+    if (id === "claude") path = join(directories.claude, "CLAUDE.md");
     return { id, path, scope: id === "cursor" ? "project" : "global" };
   }));
 }
@@ -292,8 +297,8 @@ async function interactiveSelection(detected, options, { input, output, home, en
       const answer = await ask("Clients: ");
       if (answer === null || answer.toLowerCase() === "q") return null;
       const numbers = answer ? answer.split(",").map((value) => value.trim()) : [];
-      if (numbers.some((value) => !/^[1-5]$/.test(value))) {
-        output.write("Choose client numbers 1-5, separated by commas.\n");
+      if (numbers.some((value) => !/^[1-9]\d*$/.test(value) || Number(value) > CLIENTS.length)) {
+        output.write(`Choose client numbers 1-${CLIENTS.length}, separated by commas.\n`);
         continue;
       }
       clients = answer ? [...new Set(numbers.map((value) => CLIENTS[Number(value) - 1].id))]

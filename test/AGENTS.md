@@ -37,6 +37,7 @@ pnpm test:real:cursor
 pnpm test:real:opencode
 pnpm test:real:dsh
 pnpm test:real:codex
+pnpm test:real:claude
 ```
 
 Run these only when the corresponding CLI is installed/authenticated and the change needs verification against a real implementation. A missing real-provider environment is not a reason to weaken or skip hermetic coverage.
@@ -54,6 +55,10 @@ Use the narrowest test file that owns the behavior:
 - `dsh-runner.test.ts` — DSH adapter behavior.
 - `codex-runner.test.ts` — native Codex protocol, session, permission, and lifecycle behavior.
 - `codex-shutdown.test.ts` — shared shutdown across Codex and ACP workers.
+- `claude-runner.test.ts` — Claude ACP permissions, configuration, session restore and cleanup.
+- `claude-windows-command.test.ts` — verified Claude npm/pnpm launchers without shell execution.
+- `claude-shutdown.test.ts` — shared shutdown across Claude and native workers.
+- `claude-cleanup.test.ts` — unconfirmed Claude cleanup retains the orphaned workspace lease.
 - `process-lifecycle.test.ts` — cancellation, timeouts, child/process cleanup, and shutdown-sensitive cases.
 - `server.test.ts` — MCP tool schemas/wiring and structured results/errors.
 - `append-agent-relay-instructions.test.ts` — setup-script transformations.

@@ -4,7 +4,7 @@ import type { SessionRecord } from "../store.js";
 
 export type ProgressReporter = (message: string) => Promise<void> | void;
 
-export type Provider = "grok" | "cursor" | "opencode" | "dsh";
+export type Provider = "grok" | "cursor" | "opencode" | "dsh" | "claude";
 export type ExistingSessionAction = "resume" | "load";
 
 export type ToolCallUpdate = {
@@ -60,6 +60,7 @@ export type ProviderAdapter<I extends DelegateInput, R extends RelayResult> = {
   existingSession?(initialized: acp.InitializeResponse, input: I): ExistingSessionAction;
   validateInitialized?(initialized: acp.InitializeResponse): void;
   validateInput?(input: I): void;
+  mapError?(error: unknown): RelayFailure | undefined;
   createSummarizer(limitBytes: number): ProviderSummarizer<R>;
   handlePermission(params: acp.RequestPermissionRequest, rt: PermissionRuntime<R>): acp.RequestPermissionResponse;
   extendClient?(app: acp.ClientApp, summarizer: ProviderSummarizer<R>): acp.ClientApp;
