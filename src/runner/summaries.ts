@@ -1,6 +1,7 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import { RelayFailure } from "../types.js";
 import type {
+  ClaudeRelayResult,
   CursorRelayResult,
   DshRelayResult,
   GrokRelayResult,
@@ -104,8 +105,8 @@ export class CursorSummaries implements ProviderSummarizer<CursorRelayResult> {
   }
 }
 
-type StandardProvider = "opencode" | "dsh";
-type StandardRelayResult<P extends StandardProvider> = Extract<OpenCodeRelayResult | DshRelayResult, { provider: P }>;
+type StandardProvider = "opencode" | "dsh" | "claude";
+type StandardRelayResult<P extends StandardProvider> = Extract<OpenCodeRelayResult | DshRelayResult | ClaudeRelayResult, { provider: P }>;
 
 export class StandardSummaries<P extends StandardProvider> implements ProviderSummarizer<StandardRelayResult<P>> {
   readonly toolCalls: ToolCallSummary[] = [];

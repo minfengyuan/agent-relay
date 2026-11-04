@@ -93,6 +93,16 @@ When changing an existing adapter, walk through the contract in this order:
 - Usage/tool-call summaries use `StandardSummaries` with an explicit `"dsh"` provider.
 - Saved sandbox modes survive resume and cannot be verified/reset through current ACP; emit the explicit resume warning. The native file sandbox does not disable shell networking.
 
+### Claude Code
+
+- Use the external `claude-agent-acp` executable (baseline `@agentclientprotocol/claude-agent-acp@0.100.0`), with ACP v1 and no interactive `authenticate`. Preserve local credentials and `CLAUDE_CODE_EXECUTABLE`.
+- Existing relay-confirmed sessions prefer resume; use load only when resume is not advertised. Never create a replacement after restore failure. Persist new records before configuration.
+- Set model then effort from advertised config options, refresh after each response, then set and verify `mode: acceptEdits` before every prompt, including restored sessions.
+- Do not advertise terminal authentication, file/terminal services, or elicitation UI. Refuse permission requests via `reject_once` or cancel and return `PERMISSION_REQUIRED`. Native allow rules, hooks and networking still apply; this is not OS isolation.
+- Require and await `session/close`; reuse the common lifecycle and cleanup path. Map only structured ACP `authRequired` errors to `AUTH_UNAVAILABLE` through `mapError`, without message matching.
+- Windows launchers use `windows-command.ts` with the official package name, bin name and entry path. Keep the DSH resolver wrapper compatible.
+- Summaries use `StandardSummaries` with provider `"claude"` and ACP usage semantics.
+
 ## Adding a provider
 
 Adding a provider is intentionally more than creating one adapter file. At minimum inspect/update these layers:

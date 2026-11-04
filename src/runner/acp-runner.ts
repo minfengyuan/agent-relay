@@ -422,7 +422,7 @@ export class AcpRunner<I extends DelegateInput, R extends RelayResult> {
           : error);
       const failure = effectiveError instanceof RelayFailure
         ? effectiveError
-        : new RelayFailure(
+        : this.adapter.mapError?.(effectiveError) ?? new RelayFailure(
           "ACP_FAILURE",
           `${effectiveError instanceof Error ? effectiveError.message : String(effectiveError)}${stderr ? `; ${this.adapter.displayName} stderr: ${stderr}` : ""}`,
         );

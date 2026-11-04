@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-通过一个本地 MCP Server，让任何支持 stdio 的 MCP 客户端调用 **Grok**、**Cursor**、**OpenCode**、**DSH** 和 **Codex**。
+通过一个本地 MCP Server，让任何支持 stdio 的 MCP 客户端调用 **Grok**、**Cursor**、**OpenCode**、**DSH**、**Codex** 和 **Claude Code**。
 
 `agent-relay` 将 MCP 工具调用桥接到本地 Coding Agent，使用 ACP 或 Codex 原生 app-server 协议。调用方负责统一编排和结果审查；relay 执行一轮非交互任务，返回有大小限制的输出和可继续使用的会话 ID。
 
@@ -23,6 +23,7 @@
 | OpenCode | `opencode_delegate` | 支持可选 model、effort、agent 的编码任务 |
 | DSH | `dsh_delegate` | 通过 DeepSeek Harness 执行编码任务 |
 | Codex | `codex_delegate` | 通过 Codex 原生 app-server 执行编码任务 |
+| Claude Code | `claude_delegate` | 通过 Claude Agent ACP 桥接执行编码任务 |
 
 ## 快速开始
 
@@ -68,7 +69,7 @@ node /ABSOLUTE/PATH/agent-relay/dist/cli.js
 }
 ```
 
-Cursor 需要显式配置可执行文件路径。Grok、OpenCode、DSH 和 Codex 默认使用 PATH 中的 `grok`、`opencode`、`dsh` 和 `codex`。只需安装并认证实际要调用的 Agent。
+Cursor 需要显式配置可执行文件路径。Grok、OpenCode、DSH、Codex 和 Claude Code 默认使用 PATH 中的 `grok`、`opencode`、`dsh`、`codex` 和 `claude-agent-acp`。只需安装并认证实际要调用的 Agent。Claude Code 还需单独安装下文说明的 ACP 桥接程序。
 
 relay 使用 stdio，stdout 专用于 MCP 消息。任务默认总超时为一小时；如果客户端支持设置工具调用超时，建议至少设为 3660 秒，并始终高于自定义的 relay 总超时。客户端超时和进度设置方式以各客户端为准。
 
@@ -91,7 +92,7 @@ AGENT_RELAY_CURSOR_COMMAND = "/ABSOLUTE/PATH/TO/cursor-agent"
 pnpm setup:instructions
 ```
 
-该命令检测 **Codex、Cursor、OpenCode、Grok 和 DSH**，展示检测依据和规则目标，然后按编号交互多选。回车选择全部已检测客户端，输入 `q` 取消。检测依据为 PATH 中的命令和已有客户端配置目录，不启动客户端，也不验证认证或 MCP 注册状态。也可显式选择未检测到的客户端。
+该命令检测 **Codex、Cursor、OpenCode、Grok、DSH 和 Claude Code**，展示检测依据和规则目标，然后按编号交互多选。回车选择全部已检测客户端，输入 `q` 取消。检测依据为 PATH 中的命令和已有客户端配置目录，不启动客户端，也不验证认证或 MCP 注册状态。也可显式选择未检测到的客户端。
 
 | 客户端 | 规则目标 | 作用范围 |
 | --- | --- | --- |
@@ -100,6 +101,7 @@ pnpm setup:instructions
 | OpenCode | 设置 `$OPENCODE_CONFIG_DIR` 时使用其下的 `AGENTS.md`；否则为 `$XDG_CONFIG_HOME/opencode/AGENTS.md`，默认 `~/.config/opencode/AGENTS.md` | 全局 |
 | Grok | `$GROK_HOME/AGENTS.md`，默认 `~/.grok/AGENTS.md` | 全局 |
 | DSH | `$DSH_HOME/AGENTS.md`，默认 `~/.dsh/AGENTS.md` | 全局 |
+| Claude Code | `$CLAUDE_CONFIG_DIR/CLAUDE.md`，默认 `~/.claude/CLAUDE.md` | 全局 |
 
 Cursor 需要已有项目目录，未提供时会交互询问。其规则仅对该项目生效；全局 User Rules 仍通过 Cursor 设置界面管理。其他客户端使用各自的全局指令文件。环境变量覆盖必须与对应客户端启动时保持一致。
 
@@ -107,6 +109,7 @@ Cursor 需要已有项目目录，未提供时会交互询问。其规则仅对�
 
 ```bash
 pnpm setup:instructions --clients codex,opencode,grok,dsh
+pnpm setup:instructions --clients claude
 pnpm setup:instructions --clients codex,cursor --project /absolute/project
 pnpm setup:instructions --clients codex,cursor --project /absolute/project --dry-run
 pnpm setup:instructions --help
@@ -136,16 +139,18 @@ pnpm setup:instructions --help
 将 /path/to/worktree 中的这个实现任务交给 DSH。
 
 将 /path/to/worktree 中的这个实现任务交给 Codex。
+
+将 /path/to/worktree 中的这个实现任务交给 Claude Code。
 ```
 
-每个工具都需要 `task` 和绝对路径 `cwd`。将返回的 `sessionId` 连同相同工作目录传给同一个工具，即可继续对应 Agent 的会话。各 provider 的可选参数可通过 MCP 工具发现获取；原有四个 ACP 工具保留契约，并新增 `codex_delegate`。
+每个工具都需要 `task` 和绝对路径 `cwd`。将返回的 `sessionId` 连同相同工作目录传给同一个工具，即可继续对应 Agent 的会话。各 provider 的可选参数可通过 MCP 工具发现获取。
 
 ```text
 调用方选择任务和 worktree
         ↓
 agent-relay 执行一轮 Agent 任务
         ↓
-Grok / Cursor / OpenCode / DSH / Codex 在本地工作
+Grok / Cursor / OpenCode / DSH / Codex / Claude Code 在本地工作
         ↓
 调用方审查结果、diff 和测试
         ↓
@@ -203,9 +208,32 @@ V1 子进程保留 `OPENCODE_PERMISSION` 中的其他规则，同时强制 `ques
 
 真实 smoke 需显式运行 `pnpm test:real:codex`，或 `RUN_CODEX_REAL_TESTS=1 pnpm exec vitest run test/codex-real-smoke.test.ts`。测试使用临时状态和工作目录，但会使用真实 Codex 账户和服务。
 
+### Claude Code
+
+单独安装 ACP 桥接程序；本次接入以 `@agentclientprotocol/claude-agent-acp@0.100.0` 为兼容基线：
+
+```bash
+npm install -g @agentclientprotocol/claude-agent-acp@0.100.0
+claude-agent-acp --cli auth login
+```
+
+桥接程序使用 Claude Agent SDK 及其附带的原生 Claude 可执行文件，可沿用兼容的本地认证或 provider 环境凭据。需要其他原生可执行文件时，设置上游 `CLAUDE_CODE_EXECUTABLE` 为其绝对路径。`AGENT_RELAY_CLAUDE_COMMAND` 选择的是**桥接程序**，不是原生 `claude` 命令。relay 不在委派时安装软件或启动交互登录。
+
+`claude_delegate` 接收 `task`、绝对路径 `cwd`，以及可选的 `sessionId`、`model` 和 `effort`。模型和推理强度必须是桥接端公布的 `configOptions` 值；relay 先设置模型再设置 effort，每次更新后刷新选项。省略的选项保持 provider 状态。值无效或选项不可用时，返回 `INVALID_CONFIG` 或 `CONFIG_UNSUPPORTED`。
+
+新建和恢复会话后，均在发送任务前显式设置 `acceptEdits`。文件编辑可以直接执行；额外 ACP 审批请求被拒绝，返回 `PERMISSION_REQUIRED` 及可用的部分输出。relay 不声明终端认证、文件/终端服务或问询 UI；基线桥接程序在没有表单支持时禁用 `AskUserQuestion`。原生允许规则、hooks、shell 网络和外部 MCP 服务仍生效；这不构成文件系统或网络隔离。
+
+会话记录使用独立 `claude` 命名空间，与其他 provider 共用工作目录锁。只能在原 `cwd` 恢复 relay 已确认的 ID。优先 resume；仅在未公布 resume 能力时使用 load。恢复失败不新建替代会话。新 ID 在配置前持久化，使配置错误也能返回可恢复 ID。ACP 认证缺失映射为 `AUTH_UNAVAILABLE`；应先在 relay 外完成登录，再使用可用的已确认会话重试。
+
+桥接端必须公布 `session/close`。relay 关闭会话、确认进程树清理后才释放工作目录锁。结果包含 `provider: "claude"` 和公共结果字段，以及可选的有界工具调用和 ACP usage 摘要。
+
+Windows 下，受支持的 npm/pnpm `.cmd` 启动脚本会解析为通过包信息与 `bin.claude-agent-acp` 校验的入口，再由 Node 执行，不经过 shell。也支持原生 `.exe`/`.com` 和显式 `.js`/`.mjs`；任意 batch 脚本会被拒绝。
+
+真实 smoke 需显式运行 `pnpm test:real:claude`，或 `RUN_CLAUDE_REAL_TESTS=1 pnpm exec vitest run test/claude-real-smoke.test.ts`。可选 `CLAUDE_TEST_MODEL` 和 `CLAUDE_TEST_EFFORT` 验证显式配置。测试在临时工作目录中编辑文件、跨进程恢复会话，并检查锁释放；需要认证且可能消耗模型额度。默认测试使用 fake bridge。
+
 ### 原生权限策略
 
-relay 使用各 CLI 的原生控制设置工作区可写并关闭已知 Web 工具。各 provider 的能力不同。额外 ACP/native 审批请求均拒绝；Grok 的意外权限请求直接失败，不会打开交互审批流程。
+relay 使用各 provider 的原生权限控制，各 provider 的能力不同。额外 ACP/native 审批请求均拒绝；Grok 的意外权限请求直接失败，不会打开交互审批流程。
 
 | Agent | Relay 配置 | 剩余限制 |
 | --- | --- | --- |
@@ -214,6 +242,7 @@ relay 使用各 CLI 的原生控制设置工作区可写并关闭已知 Web 工�
 | Cursor | `--sandbox enabled --workspace <cwd>`、`approvalMode: allowlist`、`sandbox.networkAccess: user_config_only`，拒绝 `WebFetch(*)` | 自定义沙箱网络白名单及本地/团队策略仍生效；不等于全面禁网 |
 | OpenCode | 强制 V1 `OPENCODE_PERMISSION` 中的 `question`、`external_directory`、`webfetch`、`websearch` 为 `deny`；两个版本均拒绝额外 ACP 审批 | 不转换为 V2 权限规则，V2 自身配置仍生效；没有 OS 沙箱，shell、插件和外部 MCP 工具仍可能越界写入或联网；V1 外部目录拒绝也限制受支持工具的外部读取 |
 | DSH | 原生 `--patch` 将 sandbox mode 与新会话默认预设设为 `workspace-write`，审批为 `ask`，关闭 `web_search`/`web_fetch` | 文件沙箱不限制 shell 网络；恢复会话保留旧 sandbox mode，ACP 无法验证或重置；Windows ACL 和较旧 Linux Landlock 后端可能仅提供部分文件隔离 |
+| Claude Code | 新建和恢复会话均设置 `acceptEdits`，拒绝额外 ACP 审批 | 不构成文件系统或网络隔离；原生允许规则、hooks、shell 网络与外部 MCP 服务仍生效 |
 
 **OpenCode 行为变化：** 不再通过 `allow_once` 自动授予权限。有 `reject_once` 就选择拒绝，否则取消，并返回带可用部分结果的 `PERMISSION_REQUIRED`。
 
@@ -221,7 +250,7 @@ Cursor 使用 relay 状态目录下的私有 CLI 配置快照。原有 CLI 设�
 
 DSH 接收包含 relay 随包原生 patch 的私有文件，参数追加在其他启动参数之后。不修改用户 profile；`DSH_PERMISSION_MODE` 仅在子进程环境中设置。原生配置文件在确认进程清理后删除，包括启动失败、取消和超时；无法确认清理时保留文件。配置准备失败会返回结构化错误，不会无约束重试。进程崩溃可能遗留私有目录，只有确认没有工作进程使用时才能删除。
 
-Grok、Cursor、OpenCode 和 DSH 每次执行向 stderr 输出一次有长度限制的策略诊断；DSH 恢复诊断明确指出旧会话权限未统一。诊断不包含凭据或任务文本。上述设置不隔离外部 MCP 服务。自定义可执行文件/包装器必须遵守原生参数与配置；替换可执行文件不代表限制已经生效。
+Grok、Cursor、OpenCode、DSH 和 Claude Code 每次执行向 stderr 输出一次有长度限制的策略诊断；DSH 恢复诊断明确指出旧会话权限未统一。诊断不包含凭据或任务文本。上述设置不隔离外部 MCP 服务。自定义可执行文件/包装器必须遵守原生参数与配置；替换可执行文件不代表限制已经生效。
 
 策略通过各 provider 自身支持的后端面向 macOS、Linux 和 Windows；relay 能启动 CLI 不代表该平台具备可用沙箱。隔离测试验证配置和拒绝行为，不证明真实 CLI 隔离能力。真实 CLI 验收仍需显式启用：在临时工作区检查内部/外部写入、shell 联网、Web 工具与恢复会话，记录 OS、CLI 版本及实际结果。未执行的平台与能力均标记为未验证。
 
@@ -236,6 +265,7 @@ Grok、Cursor、OpenCode 和 DSH 每次执行向 stderr 输出一次有长度限
 | `AGENT_RELAY_OPENCODE_COMMAND` | `opencode` | OpenCode 可执行文件 |
 | `AGENT_RELAY_DSH_COMMAND` | `dsh` | DSH 可执行文件 |
 | `AGENT_RELAY_CODEX_COMMAND` | `codex` | Codex 原生可执行文件 |
+| `AGENT_RELAY_CLAUDE_COMMAND` | `claude-agent-acp` | Claude ACP 桥接可执行文件 |
 | `AGENT_RELAY_STATE_DIR` | `~/.local/agent-relay` | 会话元数据及工作目录锁 |
 | `AGENT_RELAY_PHASE_TIMEOUT_MS` | `30000` | 协议阶段超时 |
 | `AGENT_RELAY_TOTAL_TIMEOUT_MS` | `3600000` | 任务总超时 |

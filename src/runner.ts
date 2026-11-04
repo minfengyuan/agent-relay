@@ -12,3 +12,4 @@ export { CursorRunner } from "./adapters/cursor.js";
 export { OpenCodeRunner } from "./adapters/opencode.js";
 export { DshRunner } from "./adapters/dsh.js";
 export { CodexRunner } from "./runner/codex-runner.js";
+export { ClaudeRunner } from "./adapters/claude.js";

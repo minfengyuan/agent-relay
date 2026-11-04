@@ -47,7 +47,7 @@ async function runCli(root: string, args: string[] = [], options: {
     syncBuiltinESMExports();
   `).toString("base64");
   const result = execFileAsync(process.execPath, ["--import", `data:text/javascript;base64,${preload}`, script, ...args], {
-    env: { ...process.env, PATH: "", Path: "", CODEX_HOME: "", GROK_HOME: "", DSH_HOME: "", DSH_AGENTS_HOME: "",
+    env: { ...process.env, PATH: "", Path: "", CODEX_HOME: "", GROK_HOME: "", DSH_HOME: "", DSH_AGENTS_HOME: "", CLAUDE_CONFIG_DIR: "",
       XDG_CONFIG_HOME: "", OPENCODE_CONFIG_DIR: "", OPENCODE_DISABLE_CLAUDE_CODE: "", OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: "",
       ...options.env, AGENT_RELAY_TEST_HOME: root, AGENT_RELAY_TEST_TTY: options.interactive ? "1" : "0",
       AGENT_RELAY_TEST_FAIL_WRITE: options.failWrite ?? "" },
@@ -89,6 +89,7 @@ describe("append-agent-relay-instructions", () => {
     expect(first).toContain("`opencode_delegate`");
     expect(first).toContain("`dsh_delegate`");
     expect(first).toContain("`codex_delegate`");
+    expect(first).toContain("`claude_delegate`");
     expect(first).toContain("INTERACTION_REQUIRED");
     expect(first).toContain("PERMISSION_REQUIRED");
     expect(first).toContain("allow_once");
@@ -190,14 +191,15 @@ describe("append-agent-relay-instructions", () => {
     },
   );
 
-  it("installs all five clients into native locations and remains idempotent", async () => {
+  it("installs all six clients into native locations and remains idempotent", async () => {
     const root = await tempHome();
     const project = join(root, "project with spaces");
     await mkdir(project);
-    const args = ["--clients", "codex,cursor,opencode,grok,dsh", "--project", project];
+    const args = ["--clients", "codex,cursor,opencode,grok,dsh,claude", "--project", project];
     const first = await runCli(root, args);
     const paths = [join(root, ".codex", "AGENTS.md"), join(project, ".cursor", "rules", "agent-relay.mdc"),
-      join(root, ".config", "opencode", "AGENTS.md"), join(root, ".grok", "AGENTS.md"), join(root, ".dsh", "AGENTS.md")];
+      join(root, ".config", "opencode", "AGENTS.md"), join(root, ".grok", "AGENTS.md"), join(root, ".dsh", "AGENTS.md"),
+      join(root, ".claude", "CLAUDE.md")];
     const contents = await Promise.all(paths.map((path) => readFile(path, "utf8")));
     for (const content of contents) {
       expect(content).toContain(startMarker);
@@ -210,9 +212,55 @@ describe("append-agent-relay-instructions", () => {
     expect(first.stdout).toContain("codex: create (global)");
     expect(first.stderr).toBe("");
     const second = await runCli(root, args);
-    expect(second.stdout.match(/: unchanged /g)).toHaveLength(5);
+    expect(second.stdout.match(/: unchanged /g)).toHaveLength(6);
     expect(await Promise.all(paths.map((path) => readFile(path, "utf8")))).toEqual(contents);
     await expect(readFile(join(root, ".agents", "AGENTS.md"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("detects Claude through its custom directory and preserves user instructions", async () => {
+    const root = await tempHome();
+    const path = join(root, "custom claude", "CLAUDE.md");
+    await put(path, "# User preferences\n");
+    const options = { env: { CLAUDE_CONFIG_DIR: "~/custom claude" } };
+    const preview = await runCli(root, ["--clients", "claude", "--dry-run"], options);
+    expect(preview.stdout).toContain(`Claude Code: directory: ${dirname(path)}`);
+    expect(preview.stdout).toContain("[dry-run] claude: update");
+    expect(await readFile(path, "utf8")).toBe("# User preferences\n");
+    await runCli(root, ["--clients", "claude"], options);
+    const content = await readFile(path, "utf8");
+    expect(content).toMatch(/^# User preferences\n/);
+    expect(content).toContain("`claude_delegate`");
+    expect(content).toContain("`acceptEdits`");
+    expect((await runCli(root, ["--clients", "claude"], options)).stdout).toContain("claude: unchanged");
+    await expect(readFile(join(root, ".claude", "CLAUDE.md"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("selects the sixth client interactively and previews with no directories created", async () => {
+    const root = await tempHome();
+    const result = await runCli(root, ["--dry-run"], { interactive: true, input: "7\n6\n" });
+    expect(result.stdout).toContain("Choose client numbers 1-6");
+    expect(result.stdout).toContain("[dry-run] claude: create");
+    await expect(readFile(join(root, ".claude", "CLAUDE.md"))).rejects.toMatchObject({ code: "ENOENT" });
+    const installed = await runCli(root, [], { interactive: true, input: "6\n" });
+    expect(installed.stdout).toContain("claude: create");
+  });
+
+  it("preflights Claude before writing any selected client", async () => {
+    const root = await tempHome();
+    await put(join(root, ".claude", "CLAUDE.md"), startMarker);
+    await expect(runCli(root, ["--clients", "codex,claude"])).rejects.toThrow("incomplete");
+    await expect(readFile(join(root, ".codex", "AGENTS.md"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(join(root, ".claude", "CLAUDE.md"), "utf8")).toBe(startMarker);
+  });
+
+  it("detects the Claude executable without launching it", async () => {
+    const root = await tempHome();
+    const bin = join(root, "bin");
+    const command = join(bin, process.platform === "win32" ? "claude.cmd" : "claude");
+    await put(command, "must never run");
+    await chmod(command, 0o755);
+    const result = await runCli(root, ["--clients", "claude", "--dry-run"], { env: { PATH: bin } });
+    expect(result.stdout.toLowerCase()).toContain(`Claude Code: command: ${command}`.toLowerCase());
   });
 
   it("honors CODEX_HOME, DSH_HOME, GROK_HOME and XDG_CONFIG_HOME with tilde expansion", async () => {
