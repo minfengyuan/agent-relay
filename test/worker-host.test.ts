@@ -134,6 +134,63 @@ describe("WorkerHost", () => {
     await lease.release();
   });
 
+  it("runs a preparation helper and the worker under one lease", async () => {
+    const { stateDir, cwd } = await setup();
+    const steps: string[] = [];
+    let acquired = 0;
+    const store = new SessionStore(stateDir);
+    const acquire = store.acquire.bind(store);
+    store.acquire = async (target) => {
+      acquired += 1;
+      const lease = await acquire(target);
+      for (const key of ["markSpawning", "bindWorker", "markTerminating", "markReaped", "markOrphaned", "release"] as const) {
+        const original = lease[key].bind(lease) as (...args: unknown[]) => Promise<void>;
+        (lease as unknown as Record<string, unknown>)[key] = async (...args: unknown[]) => {
+          steps.push(key === "markReaped" ? `${key}:${String(args[0])}` : key);
+          await original(...args);
+        };
+      }
+      return lease;
+    };
+    const host = new WorkerHost(baseConfig(stateDir), store);
+    let helperStdout = "";
+    await expect(host.run({
+      ...driver("Worker"),
+      cwd,
+      prepare: async (env, _record, runHelper) => {
+        helperStdout = (await runHelper({
+          command: process.execPath, args: ["-e", "process.stdout.write('cfg')"], env, timeoutMs: 5_000,
+        })).stdout;
+        return { env, dispose: async () => {} };
+      },
+    })).rejects.toMatchObject({ code: "CODEX_FAILURE", message: "original failure" });
+    expect(helperStdout).toBe("cfg");
+    expect(acquired).toBe(1);
+    expect(steps).toEqual([
+      "markSpawning", "bindWorker", "markTerminating", "markReaped:tree-exit-confirmed",
+      "markSpawning", "bindWorker", "markTerminating", "markReaped:tree-exit-confirmed",
+      "release",
+    ]);
+  });
+
+  it("does not spawn the worker after unconfirmed helper cleanup", async () => {
+    state.cleanupConfirmed = false;
+    const { cwd, host } = await setup();
+    const before = state.children.length;
+    await expect(host.run({
+      ...driver("Worker"),
+      cwd,
+      prepare: async (env, _record, runHelper) => {
+        await runHelper({ command: process.execPath, args: ["-e", ""], env, timeoutMs: 5_000 });
+        return { env, dispose: async () => {} };
+      },
+    })).rejects.toMatchObject({
+      code: "PROCESS_CLEANUP_FAILED",
+      message: expect.stringContaining("injected cleanup uncertainty"),
+    });
+    expect(state.children.length - before).toBe(1);
+  });
+
   it("preserves the outer total timeout while a helper subprocess is running", async () => {
     const { stateDir, cwd } = await setup();
     const host = new WorkerHost(baseConfig(stateDir, { totalTimeoutMs: 250 }), new SessionStore(stateDir));
