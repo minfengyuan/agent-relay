@@ -161,6 +161,8 @@ Grok / Cursor / OpenCode / DSH / Codex / Claude Code 在本地工作
 
 ### Grok
 
+转录基线为 Grok 1.0.77。子进程参数已从 ACP 的 `agent stdio` 改为顶层 headless 参数。如果 `AGENT_RELAY_GROK_COMMAND` 指向包装脚本，需要更新脚本以转发新参数，不再注入 ACP 参数。MCP 工具名、输入和结果字段不变。
+
 Grok 使用 headless 流式 JSON（`--output-format streaming-json`），沿用 CLI 已有认证。即使用户配置启用了 leader mode，每次 headless 运行仍启动自己的 daemon；Relay 不连接共享 leader，也不再传 ACP 专用的 `--no-leader`。
 
 Relay 保留 `--sandbox workspace`、禁用内置 Web search/fetch、显式拒绝 `WebFetch`/`WebSearch`，以及 `--always-approve`；另传 `--disallowed-tools ask_user_question` 和 `--no-wait-for-background`，支持无人值守执行。Grok 状态目录和临时目录仍可写，shell 网络仍可用；这些设置不隔离外部 MCP 服务。
@@ -201,6 +203,8 @@ V1 子进程保留 `OPENCODE_PERMISSION` 中的其他规则，同时强制 `ques
 2026 年 11 月 3 日，在 macOS、OpenCode 2.0.12 和已配置的 `opencode/pulse-alpha-free` 模型上，六项真实测试在此前 `allow_once` 策略下全部通过。问题工具探针在没有用户输入时返回 `stopReason: "cancelled"`。新的拒绝策略尚未重新进行真实 provider 验证；V1 和 Windows 的真实运行仍未验证。
 
 ### DSH
+
+转录基线为 DSH 0.2.2-rc.1。子进程参数已从 `--profile acp` 改为 `--profile headless --patch <permissions> [--patch <model>] --json --permission-mode workspace-write --approval-policy never [--session-id <id>] -`。通过 `AGENT_RELAY_DSH_COMMAND` 选择的包装脚本需要转发这些参数和 stdin。权限拒绝现在于轮次结束后检测，不再在首个 ACP 请求被拒时立即中止；模型可能继续执行，需检查部分结果。
 
 Relay 运行 `dsh --profile headless`，逐行读取 JSON 事件。Relay 自有的 `--patch` 文件紧跟在 `--profile headless` 之后、应用参数之前：一个 `0600` 权限 patch，以及可选的 `0600` 模型路由 patch。Relay 不修改 `$DSH_HOME/profiles/headless/cordis.patch.yml`。任务通过 stdin 写入，不放入 argv。
 
@@ -254,6 +258,8 @@ claude -p --output-format stream-json --verbose \
 relay 在本地按 `low`、`medium`、`high`、`xhigh`、`max` 校验 `effort`；值无效时在启动进程前返回 `INVALID_CONFIG`，因为 Claude 会静默忽略未知 effort。model 没有可靠的本地校验方式：relay 原样传值，行为取决于所配置网关；未知 model 可能成功、被忽略或在运行时失败。
 
 会话记录继续使用独立 `claude` 命名空间，并与其他 provider 共用工作目录锁。新会话由 relay 生成 UUID 并通过 `--session-id` 传入，在模型调用前的 `system/init` 到达时持久化。恢复时只把 relay 已记录的 UUID 传给 `--resume`，且必须使用原 `cwd`；不使用标题匹配，未知会话返回 `UNKNOWN_SESSION`，不会创建替代会话。
+
+旧 ACP Claude 会话的兼容性仍是假设，尚未实测。Relay 保留 `sessions/claude`；原生 CLI 无法恢复旧 UUID 时返回 `UNKNOWN_SESSION`，不会替换为新对话。Grok 的 ACP 会话兼容性已经实测；DSH 在相同解析后 cwd 下接受裸 ACP UUID 和原生 headless ID。
 
 `--permission-prompts none` 会自动拒绝需要审批的操作。Claude 在 `result.permission_denials` 中报告这些调用；relay 先完成轮次，再以 `PERMISSION_REQUIRED` 返回可用的文本和有界工具摘要。这与 ACP 行为不同：第一次拒绝不再立即中止，模型可能在某个工具被拒后继续执行其他工作。原生允许规则、hooks、shell 网络和外部 MCP 服务仍生效。`acceptEdits` 不构成文件系统或网络隔离。
 
@@ -339,4 +345,4 @@ pnpm test
 pnpm build
 ```
 
-默认测试使用假 ACP Agent。真实 Agent 冒烟测试需主动启用，参见 [`test/AGENTS.md`](test/AGENTS.md)。
+默认测试使用假 ACP Agent、假 Codex app-server 和已提交的 headless 转录回放。真实 Agent 冒烟测试需主动启用，参见 [`test/AGENTS.md`](test/AGENTS.md)。Grok/DSH/Claude 冒烟测试检查 CLI 版本与精确基线一致，并将观察到的事件类型与已提交转录比较。新版本或未知事件类型会使冒烟检查失败，要求人工复核；生产代码仍忽略未知事件类型。

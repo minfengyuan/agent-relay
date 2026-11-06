@@ -118,6 +118,8 @@ When changing an existing adapter, walk through the contract in this order:
 
 ## Adding a provider
 
+Choose the transport before the runner. Verify event/terminal semantics, session compatibility, permission behavior, and graceful child cleanup against a pinned CLI version. Use `AcpRunner` for ACP, `HeadlessRunner` for a one-way NDJSON event stream with a terminal event, or a dedicated driver on `WorkerHost` for native bidirectional RPC. Do not infer print-mode parity from the presence of a JSON flag: Cursor stays on ACP because equivalent extension summaries, approval behavior, and ask-mode validation are unverified. See [`ARCHITECTURE.md`](../../ARCHITECTURE.md) for the transport decision and S1–S3 evidence.
+
 Adding a provider is intentionally more than creating one adapter file. At minimum inspect/update these layers:
 
 1. `src/types.ts` — provider-specific input/result types if the common shape is insufficient.

@@ -81,11 +81,23 @@ describe.skipIf(process.platform === "win32")("DSH headless runner", () => {
     expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(80);
   });
 
+  it("rejects a final session ID mismatch while retaining the confirmed session", async () => {
+    const fixture = await setup();
+    vi.stubEnv("FAKE_DSH_MISMATCH", "1");
+    await expect(fixture.runner.delegate({ cwd: fixture.cwd, task: "task" })).rejects.toMatchObject({
+      code: "PROTOCOL_MISMATCH", partial: { sessionId: "fake-session-1" },
+    });
+    await expect(fixture.store.read("fake-session-1", fixture.cwd)).resolves.toMatchObject({ cwd: fixture.cwd });
+    await expect(fixture.store.read("wrong-id", fixture.cwd)).rejects.toMatchObject({ code: "UNKNOWN_SESSION" });
+  });
+
   it.each([
     ["resume-unknown", "UNKNOWN_SESSION"],
     ["resume-session-other-cwd", "CWD_MISMATCH"],
     ["missing-credential", "AUTH_UNAVAILABLE"],
     ["bad-model", "ACP_FAILURE"],
+    ["resume-acp-session", "AUTH_UNAVAILABLE"],
+    ["resume-headless-session", "AUTH_UNAVAILABLE"],
   ])("maps transcript %s to %s", async (name, code) => {
     const fixture = await setup();
     vi.stubEnv("FAKE_DSH_TRANSCRIPT", name);

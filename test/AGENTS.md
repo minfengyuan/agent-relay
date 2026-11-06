@@ -42,11 +42,15 @@ pnpm test:real:claude
 
 Run these only when the corresponding CLI is installed/authenticated and the change needs verification against a real implementation. A missing real-provider environment is not a reason to weaken or skip hermetic coverage.
 
+Headless smoke checks use `headless-baseline.ts`: Grok 1.0.77, DSH 0.2.2-rc.1, and Claude Code 2.1.318. They run the real adapter and `HeadlessRunner`, check `--version`, and observe decoded stdout events. Observed types must belong to the union of committed transcripts, and scenario-required types must appear; optional hook/tool events need not appear every time. Version/type drift fails the smoke check and requires transcript review, while production continues to ignore unknown types. Do not update baseline versions just to make a smoke test pass.
+
 ## Test ownership map
 
 Use the narrowest test file that owns the behavior:
 
 - `config.test.ts` — environment parsing and defaults.
+- `headless-baseline.test.ts` — hermetic version/event drift checks and provider decoder handling of unknown types.
+- `ndjson-lines.test.ts` and `headless-runner.test.ts` — shared frame validation, session consistency, cancellation order, error precedence, truncation, and grandchild cleanup. Do not duplicate these scenarios per provider unless its decoder or graceful-stop policy changes the behavior.
 - `store.test.ts` — session persistence, validation, and state I/O.
 - `workspace-lock.test.ts` — per-`cwd` serialization/lock behavior.
 - `runner.test.ts` — generic ACP runner behavior through `TestAcpRunner`.

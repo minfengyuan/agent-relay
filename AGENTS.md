@@ -74,6 +74,10 @@ Real-agent smoke tests are opt-in because they require local CLIs/authentication
 - Never put credentials in source, fixtures, task arguments, or docs. Agent authentication comes from the local CLI/environment.
 - If public configuration, tool inputs/outputs, supported agents, or user workflow changes, update both English and Chinese READMEs.
 
+## Adding a provider
+
+Choose the transport first from verified native capabilities; see the transport selection table in [`ARCHITECTURE.md`](ARCHITECTURE.md). Then choose `AcpRunner` for ACP, `HeadlessRunner` for terminal-event NDJSON, or a dedicated native driver on `WorkerHost` for bidirectional RPC. Keep provider policy in the adapter. Cursor stays on ACP until print-mode summaries, permissions, and ask-mode validation are verified. Follow [`src/adapters/AGENTS.md`](src/adapters/AGENTS.md) for the wiring checklist.
+
 ## Validation by change type
 
 | Change | Minimum validation |

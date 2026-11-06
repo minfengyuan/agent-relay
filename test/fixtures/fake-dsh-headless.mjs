@@ -27,7 +27,9 @@ if (args.includes("--dump-config")) {
     : process.env.FAKE_SESSION_ID ?? "fake-session-1";
   const remap = (event) => {
     const copy = structuredClone(event);
-    if ("sessionId" in copy) copy.sessionId = id;
+    if ("sessionId" in copy) {
+      copy.sessionId = process.env.FAKE_DSH_MISMATCH === "1" && copy.type === "final" ? "wrong-id" : id;
+    }
     if (copy.type === "session") copy.cwd = process.cwd();
     return copy;
   };

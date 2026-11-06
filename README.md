@@ -161,6 +161,8 @@ Use separate worktrees for independent parallel tasks. Only one task may be acti
 
 ### Grok
 
+The transcript baseline is Grok 1.0.77. Child arguments changed from ACP `agent stdio` to top-level headless options. If `AGENT_RELAY_GROK_COMMAND` selects a wrapper, update it to forward the new arguments instead of injecting ACP arguments. MCP tool names, inputs, and result fields are unchanged.
+
 Grok uses headless streaming JSON (`--output-format streaming-json`), with the CLI's existing authentication. Each headless run starts its own daemon even when leader mode is enabled in user configuration; the relay does not connect to a shared leader or pass the ACP-only `--no-leader` flag.
 
 The relay keeps `--sandbox workspace`, disabled built-in web search/fetch, explicit `WebFetch`/`WebSearch` deny rules, and `--always-approve`. It also passes `--disallowed-tools ask_user_question` and `--no-wait-for-background` for unattended work. Grok state and temporary directories remain writable, and shell networking remains available. These settings do not isolate external MCP services.
@@ -201,6 +203,8 @@ Run `pnpm test:real:opencode` for authenticated V2 smoke tests. They call the co
 On November 3, 2026, all six real smoke tests passed on macOS with OpenCode 2.0.12 and the configured `opencode/pulse-alpha-free` model under the previous `allow_once` policy. The question-tool probe returned `stopReason: "cancelled"` without user input. The new refusal policy has not been revalidated with a real provider. V1 and Windows real execution remain unverified.
 
 ### DSH
+
+The transcript baseline is DSH 0.2.2-rc.1. Child arguments changed from `--profile acp` to `--profile headless --patch <permissions> [--patch <model>] --json --permission-mode workspace-write --approval-policy never [--session-id <id>] -`. Update wrappers selected by `AGENT_RELAY_DSH_COMMAND` to forward these arguments and stdin. Permission denials are now detected after the turn rather than aborting on the first ACP request; review partial output because the model can continue.
 
 The relay runs `dsh --profile headless` and reads newline-delimited JSON events. Relay-owned `--patch` files follow `--profile headless` and precede application flags: a `0600` permissions patch, plus an optional `0600` model-route patch. The relay does not edit `$DSH_HOME/profiles/headless/cordis.patch.yml`. The task is written to stdin and is not exposed in argv.
 
@@ -254,6 +258,8 @@ The task is written to stdin, not exposed in argv. `claude_delegate` accepts `ta
 The relay validates `effort` locally against `low`, `medium`, `high`, `xhigh`, and `max`; an invalid value returns `INVALID_CONFIG` before the process starts, because Claude otherwise silently ignores an unknown effort. There is no reliable local model validation: the relay passes `model` unchanged, and behavior depends on the configured gateway. An unknown model may succeed, be ignored, or fail at runtime.
 
 Sessions keep the separate `claude` namespace and shared cross-provider workspace locks. A new relay UUID is passed to `--session-id` and persisted when `system/init` arrives, before the model call. Resume passes only a relay-recorded UUID with `--resume` in the original `cwd`; title matching is never used, and an unknown session returns `UNKNOWN_SESSION` without creating a replacement.
+
+Compatibility with ACP-created Claude sessions is assumed, not measured. The relay retains `sessions/claude`; if the native CLI cannot restore an old UUID, it returns `UNKNOWN_SESSION` without substituting a new conversation. Grok ACP-session compatibility was measured, and DSH accepts both bare ACP UUIDs and native headless IDs in the same resolved cwd.
 
 With `--permission-prompts none`, actions that require approval are denied automatically. Claude reports them in `result.permission_denials`; the relay finishes the turn and returns `PERMISSION_REQUIRED` with available text and bounded tool summaries. This is a behavior change from ACP: the first denial no longer aborts immediately, and the model may continue with other work after a denied tool. Native allow rules, hooks, shell networking, and external MCP services still apply. `acceptEdits` is not filesystem or network isolation.
 
@@ -339,4 +345,4 @@ pnpm test
 pnpm build
 ```
 
-The default suite uses fake ACP agents and a fake Codex app-server. Real-agent smoke tests are opt-in; see [`test/AGENTS.md`](test/AGENTS.md).
+The default suite uses fake ACP agents, a fake Codex app-server, and committed headless transcript replays. Real-agent smoke tests are opt-in; see [`test/AGENTS.md`](test/AGENTS.md). Grok/DSH/Claude smoke tests check the exact baseline CLI version and observed event types against the committed transcripts. Unexpected types or versions fail the smoke check for review; production continues to ignore unknown event types.

@@ -15,16 +15,32 @@ src/cli.ts → src/cli-runtime.ts
 src/server.ts
   │ validated delegate request
   ▼
-AcpRunner / HeadlessRunner / CodexRunner ── SessionStore
-  │                    │
-  │ ACP or native      ├─ session metadata
-  │ stdin/stdout       └─ per-cwd locks
-  ▼
-Provider CLI
-(Grok / Cursor / OpenCode / DSH / Codex / Claude Code)
+  ├─ AcpRunner ────────────────────── Cursor / OpenCode (ACP)
+  │    └─ inline lifecycle + lease
+  │
+  ├─ HeadlessRunner ─┐
+  │                 ├─ WorkerHost ── owned CLI process tree
+  └─ CodexRunner ────┘                 ├─ Grok / DSH / Claude (NDJSON)
+                                      └─ Codex (app-server JSONL RPC)
+
+All runners ── lifecycle.ts (admission / shutdown)
+            └─ SessionStore (session metadata / shared per-cwd locks)
 ```
 
 The relay is an orchestration boundary, not a second autonomous planner. The calling client chooses what to delegate and reviews/integrates the result; the relay executes one non-interactive provider turn and returns a resumable session ID plus bounded output.
+
+## Transport selection
+
+Choose the transport from verified native capabilities before choosing a runner.
+
+| Provider | Transport / runner | Reason |
+| --- | --- | --- |
+| Grok | streaming JSON / `HeadlessRunner` | Native unattended turns own their daemon, expose terminal events, and resume ACP-created UUIDs. |
+| DSH | headless JSON / `HeadlessRunner` | Each invocation enforces workspace-write and never approvals, including resume; no ACP close requirement. |
+| Claude Code | stream-json / `HeadlessRunner` | Native CLI credentials and result/permission-denial events remove the separate ACP bridge. |
+| Codex | native app-server / `CodexRunner` | Persistent threads, bidirectional requests, approvals, and turn interrupts need a native RPC driver. |
+| Cursor | ACP / `AcpRunner` | Print-stream equivalents for interactions/todos/subagents/images are unverified. Print approval/WebFetch behavior is unverified, and it cannot validate ask mode through advertised session modes. A separate spike is required before changing transport. |
+| OpenCode | ACP / `AcpRunner` | Existing capability negotiation, session options, permission refusal, and summaries remain on the supported ACP interface. |
 
 ## Layer boundaries
 
@@ -91,6 +107,15 @@ Both runners register with `src/runner/lifecycle.ts` before acquiring a lease. T
 ### Headless NDJSON execution
 
 `src/runner/headless-runner.ts` adds a provider-neutral driver on `WorkerHost`. Its `HeadlessAdapter` contract in `types.ts` owns command/preparation, stdin policy, event decoding, terminal/exit interpretation, summaries, and graceful-stop signal/grace. Preparation uses a private native-config task directory, retained when process cleanup cannot be confirmed. DSH, Grok, and Claude use this layer; DSH also uses the host helper entry for `--dump-config` model-route preflight.
+
+The driver lifecycle is:
+
+1. The host checks admission/nesting, registers cancellation and total timeout, acquires the workspace lease, and reads any recorded session.
+2. The adapter selects a preset ID when needed and prepares private files, optional helpers, arguments, environment, and stdin (`ignore`, `close`, or `{ write }`).
+3. The host marks spawning, spawns without a shell in the resolved cwd, marks the child `AGENT_RELAY_DELEGATED=1`, binds its process tree, and collects bounded stderr.
+4. The driver parses frames, validates session IDs, persists a new confirmed ID, collects bounded text/summaries, and sends rate-limited progress.
+5. After stream close and process exit, the driver applies stderr/permission failures and calls `complete(state, exit)`. A terminal success event and a valid exit are both required.
+6. On cancellation, the adapter's graceful root signal precedes host tree termination. The host marks terminating, confirms tree cleanup, marks reaped, then releases the lease and disposes private files. Unconfirmed cleanup marks orphaned and retains the lease/files. Error precedence is cleanup, lease, then task failure.
 
 `ndjson-lines.ts` reads stdout with an 8 MiB per-frame limit and rejects oversized or malformed JSON as `PROTOCOL_MISMATCH`. The runner ignores unknown event types, bounds text and summaries, persists new IDs on a session event (or the first event for a preset ID), and rejects inconsistent IDs. Only relay-recorded IDs appear in partial results or resume commands. Permission denials are reported after the worker finishes, preserving later output. Completion requires a successful terminal event plus adapter validation of the process exit; successful resumes touch their record. Cancellation signals the root and waits within the adapter's grace for a terminal event before the host terminates the process tree. DSH maps its headless transcript into this contract: `final.text` is authoritative, only exit `0` plus `final.reason.kind: "completed"` succeeds, credential, session, and cwd errors are normalized, usage is omitted, and recognized sandbox or auto-review denials become post-turn `PERMISSION_REQUIRED` failures. Claude persists at `system/init`, treats a result with `is_error: false` as successful, and converts result `permission_denials` into a post-turn `PERMISSION_REQUIRED` failure.
 
@@ -189,7 +214,7 @@ Important consequences:
 - Results and partial errors expose a `sessionId` only after its relay record has been read or written successfully, so any returned ID is eligible for relay resume from its bound `cwd`.
 - A session is tied to the resolved working directory to prevent accidental continuation in another checkout/worktree.
 - Provider options that must remain stable across a session belong in persisted metadata when necessary. Cursor currently persists model/mode semantics; Grok, OpenCode, DSH, and Claude currently do not persist extra adapter metadata.
-- Provider capability negotiation decides whether an existing session can be resumed or loaded.
+- ACP capability negotiation decides whether an existing session can be resumed or loaded; headless adapters pass only relay-recorded IDs to native resume flags.
 - DSH persists its new relay record when the headless session event arrives, before prompting. Claude persists its preset UUID when `system/init` arrives, before the model call. Both retain their existing session namespaces for ACP-era compatibility.
 
 ## Provider behavior matrix
@@ -207,6 +232,18 @@ Important consequences:
 | Provider summaries | plain text result | tool calls, todos, subagents, interactions, images | usage and tool-call summaries | tool-call summaries; usage omitted | tool-call summaries; usage omitted |
 
 This table describes current implementation, not a requirement that every future provider behave identically.
+
+## Headless compatibility baselines and spike evidence
+
+The pinned transcript baselines are **Grok 1.0.77**, **DSH 0.2.2-rc.1**, and **Claude Code 2.1.318**. Sanitized raw events, stderr, timing, and exit status live in [`test/fixtures/transcripts/`](test/fixtures/transcripts/). These are tested observations at those versions, not guarantees about future CLI releases.
+
+| Spike | Observed conclusion and evidence | Limit / assumption |
+| --- | --- | --- |
+| S1 Grok | `new-session-success.json`: preset UUID matches `end.sessionId`; `resume-acp-session.json`: ACP context resumes through `-r`; `resume-unknown.json` and `not-signed-in.json`: structured error messages. `sigterm-during-tool.json`: early cancelled end, then exit 143. | Leader-enabled headless runs owned a private daemon in the process-tree probe (not captured in NDJSON). Tool shells can escape the original group; graceful shutdown is necessary. |
+| S2 DSH | `credential-restore-run.json`: restored credential services work; shell networking and `/tmp` writes remain possible. `sandbox-deny.json`: `FS_SANDBOX_DENIED` can precede completed final. `bad-model.json`: generic `INVALID_REQUEST`. `sigterm-tool.json`: exit 0 and error only, no final. | Both bare ACP UUIDs and headless IDs resume in the same literal cwd (`resume-acp-session.json`, `resume-headless-session.json`); those turns then fail for missing credentials. Process-tree probes found separate tool groups. |
+| S3 Claude | `new-session-success.json`: init confirms the preset UUID. `permission-denied-continues.json`: denied tools do not stop later edits. `resume-unknown.json`: unknown ID is an error result. `unknown-model-accepted.json` and `unknown-effort-ignored.json`: gateway-dependent model acceptance and silently ignored effort. Both `sigterm-*.json` traces exit 143 without result. | ACP-created session compatibility is assumed, not measured: keep `sessions/claude`, return `UNKNOWN_SESSION` if unavailable, and never create a replacement. Unauthenticated/keychain behavior was not probed against a real account. |
+
+Opt-in headless smoke tests check exact CLI versions and compare observed event types with the union in the corresponding baseline directory. Required session/text/terminal types must appear for the scenario; optional hook/tool/rate-limit types need not all appear on every run. New types fail the smoke check for review, while production still ignores unknown types. Hermetic tests exercise these checks without installed CLIs.
 
 Claude runs through the native Claude Code CLI headless stream rather than a separate ACP bridge. It preserves the user's CLI login, hooks, skills, plugins, native allow rules, and MCP configuration. The `sessions/claude` namespace and workspace locks remain unchanged. Effort is validated locally before spawn because the CLI silently ignores unknown values; model names are passed through because acceptance depends on the configured gateway. Result `permission_denials` are reported after the turn, so the model may continue after a denial.
 
