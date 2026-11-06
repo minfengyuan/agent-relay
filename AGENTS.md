@@ -4,7 +4,7 @@ This file is the default entry point for coding agents working in this repositor
 
 ## Project in one paragraph
 
-`agent-relay` is a local Node.js/TypeScript MCP server that lets any local stdio MCP client delegate work to ACP coding agents or native Codex. `src/server.ts` exposes the MCP tools; `src/runner/acp-runner.ts` and `src/runner/codex-runner.ts` own protocol execution, sharing shutdown registration in `src/runner/lifecycle.ts`. `src/adapters/` contains ACP provider policy, and `src/store.ts` persists resumable session metadata and serializes access to a working directory.
+`agent-relay` is a local Node.js/TypeScript MCP server that lets any local stdio MCP client delegate work to ACP coding agents, headless providers, or native Codex. `src/server.ts` exposes the MCP tools; `src/runner/acp-runner.ts`, `src/runner/headless-runner.ts`, and `src/runner/codex-runner.ts` own protocol execution. `src/runner/worker-host.ts` owns the protocol-independent worker lifecycle used by headless providers and Codex, while `src/runner/lifecycle.ts` owns process-wide admission and shutdown. `src/adapters/` contains provider policy, and `src/store.ts` persists resumable session metadata and serializes access to a working directory.
 
 ## Read next only when relevant
 
@@ -42,13 +42,14 @@ Real-agent smoke tests are opt-in because they require local CLIs/authentication
 - `src/cli.ts` — stdio MCP entry point and shutdown cleanup.
 - `src/server.ts` — MCP schemas, tool registration, input validation, structured error/result mapping.
 - `src/runner/acp-runner.ts` — ACP handshake, session create/load/resume, prompt execution, progress, cancellation, timeouts, and child cleanup.
+- `src/runner/worker-host.ts` — protocol-independent admission, lease, spawn, process-tree, cancellation, and cleanup lifecycle.
 - `src/runner/codex-runner.ts` — native Codex app-server threads/turns, sandbox/approval policy, cancellation, and cleanup.
 - `src/runner/lifecycle.ts` — shared task admission, shutdown registration, and cleanup aggregation.
 - `src/runner/` — shared limits, summaries, helpers, and adapter contracts.
 - `src/adapters/` — Grok, Cursor, OpenCode, DSH, and Claude Code-specific command/auth/session/permission behavior.
 - `src/store.ts` — session records plus per-`cwd` lock files.
 - `src/config.ts` — environment-backed runtime configuration.
-- `test/` — hermetic runner/server/store tests, fake ACP agents/app-server, and opt-in real smoke tests.
+- `test/` — hermetic runner/server/store tests, fake ACP agents/app-server, committed headless transcript replays, and opt-in real smoke tests.
 - `scripts/` — developer/setup utilities.
 
 ## Non-negotiable invariants
@@ -72,6 +73,10 @@ Real-agent smoke tests are opt-in because they require local CLIs/authentication
 - This is ESM TypeScript; local source imports use `.js` specifiers.
 - Never put credentials in source, fixtures, task arguments, or docs. Agent authentication comes from the local CLI/environment.
 - If public configuration, tool inputs/outputs, supported agents, or user workflow changes, update both English and Chinese READMEs.
+
+## Adding a provider
+
+Choose the transport first from verified native capabilities; see the transport selection table in [`ARCHITECTURE.md`](ARCHITECTURE.md). Then choose `AcpRunner` for ACP, `HeadlessRunner` for terminal-event NDJSON, or a dedicated native driver on `WorkerHost` for bidirectional RPC. Keep provider policy in the adapter. Cursor stays on ACP until print-mode summaries, permissions, and ask-mode validation are verified. Follow [`src/adapters/AGENTS.md`](src/adapters/AGENTS.md) for the wiring checklist.
 
 ## Validation by change type
 

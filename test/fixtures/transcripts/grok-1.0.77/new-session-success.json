@@ -1,0 +1,297 @@
+{
+  "scenario": "New session with -s UUID; reads a.txt with a tool and replies with its contents",
+  "command": "grok",
+  "args": [
+    "--no-auto-update",
+    "--sandbox",
+    "workspace",
+    "--disable-web-search",
+    "--deny",
+    "WebFetch",
+    "--deny",
+    "WebSearch",
+    "--always-approve",
+    "--disallowed-tools",
+    "ask_user_question",
+    "--no-wait-for-background",
+    "--output-format",
+    "streaming-json",
+    "--cwd",
+    "<SPIKE>/ws3",
+    "-s",
+    "3106fde4-dde7-4e00-913d-1aa1c7cce960",
+    "--prompt-file",
+    "<SPIKE>/p-read.txt"
+  ],
+  "stdin": null,
+  "signalSentMs": null,
+  "exitMs": 13597,
+  "exitCode": 0,
+  "exitSignal": null,
+  "stderr": "",
+  "lines": [
+    {
+      "t": 1169,
+      "json": {
+        "type": "available_commands",
+        "tools": [],
+        "commands": []
+      }
+    },
+    {
+      "t": 1188,
+      "json": {
+        "type": "available_commands",
+        "tools": [],
+        "commands": []
+      }
+    },
+    {
+      "t": 7491,
+      "json": {
+        "type": "text",
+        "data": "I'll"
+      }
+    },
+    {
+      "t": 7491,
+      "json": {
+        "type": "text",
+        "data": " read"
+      }
+    },
+    {
+      "t": 7491,
+      "json": {
+        "type": "text",
+        "data": " `"
+      }
+    },
+    {
+      "t": 7491,
+      "json": {
+        "type": "text",
+        "data": "a"
+      }
+    },
+    {
+      "t": 7491,
+      "json": {
+        "type": "text",
+        "data": ".txt"
+      }
+    },
+    {
+      "t": 7497,
+      "json": {
+        "type": "text",
+        "data": "`"
+      }
+    },
+    {
+      "t": 7497,
+      "json": {
+        "type": "text",
+        "data": " and"
+      }
+    },
+    {
+      "t": 7497,
+      "json": {
+        "type": "text",
+        "data": " reply"
+      }
+    },
+    {
+      "t": 7498,
+      "json": {
+        "type": "text",
+        "data": " with"
+      }
+    },
+    {
+      "t": 7498,
+      "json": {
+        "type": "text",
+        "data": " its"
+      }
+    },
+    {
+      "t": 7498,
+      "json": {
+        "type": "text",
+        "data": " exact"
+      }
+    },
+    {
+      "t": 7498,
+      "json": {
+        "type": "text",
+        "data": " contents"
+      }
+    },
+    {
+      "t": 7498,
+      "json": {
+        "type": "text",
+        "data": "."
+      }
+    },
+    {
+      "t": 7993,
+      "json": {
+        "type": "available_commands",
+        "tools": [],
+        "commands": []
+      }
+    },
+    {
+      "t": 7996,
+      "json": {
+        "type": "usage",
+        "usage": {
+          "input_tokens": 15579,
+          "output_tokens": 112,
+          "cache_read_input_tokens": 6528,
+          "cache_creation_input_tokens": 0,
+          "reasoning_tokens": 34
+        },
+        "signature": "<redacted>"
+      }
+    },
+    {
+      "t": 7996,
+      "json": {
+        "type": "tool_call",
+        "toolCallId": "call-331fc2cf-8754-41cf-b704-3a9ee6c3e83c-0",
+        "title": "read_file",
+        "kind": "read",
+        "status": "pending",
+        "toolName": "read_file",
+        "rawInput": {
+          "target_file": "<SPIKE>/ws3/a.txt"
+        },
+        "content": [],
+        "locations": []
+      }
+    },
+    {
+      "t": 7996,
+      "json": {
+        "type": "tool_call_update",
+        "toolCallId": "call-331fc2cf-8754-41cf-b704-3a9ee6c3e83c-0",
+        "status": null,
+        "content": [],
+        "rawOutput": null,
+        "locations": [
+          {
+            "path": "<SPIKE>/ws3/a.txt"
+          }
+        ]
+      }
+    },
+    {
+      "t": 8095,
+      "json": {
+        "type": "tool_call_update",
+        "toolCallId": "call-331fc2cf-8754-41cf-b704-3a9ee6c3e83c-0",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "1→hello-spike\n"
+            }
+          }
+        ],
+        "rawOutput": {
+          "type": "ReadFile",
+          "FileContent": {
+            "content": "1→hello-spike\n",
+            "content_concise": "1→hello-spike\n",
+            "absolute_path": "<SPIKE>/ws3/a.txt",
+            "offset": null,
+            "raw_output": "hello-spike\n",
+            "total_lines": 1
+          }
+        },
+        "locations": []
+      }
+    },
+    {
+      "t": 10522,
+      "json": {
+        "type": "text",
+        "data": "hello"
+      }
+    },
+    {
+      "t": 10522,
+      "json": {
+        "type": "text",
+        "data": "-"
+      }
+    },
+    {
+      "t": 10522,
+      "json": {
+        "type": "text",
+        "data": "spike"
+      }
+    },
+    {
+      "t": 10877,
+      "json": {
+        "type": "available_commands",
+        "tools": [],
+        "commands": []
+      }
+    },
+    {
+      "t": 10877,
+      "json": {
+        "type": "usage",
+        "usage": {
+          "input_tokens": 1865,
+          "output_tokens": 36,
+          "cache_read_input_tokens": 22016,
+          "cache_creation_input_tokens": 0,
+          "reasoning_tokens": 33
+        },
+        "signature": "<redacted>"
+      }
+    },
+    {
+      "t": 11696,
+      "json": {
+        "type": "end",
+        "stopReason": "end_turn",
+        "sessionId": "3106fde4-dde7-4e00-913d-1aa1c7cce960",
+        "requestId": "<redacted>",
+        "cwd": "<SPIKE>/ws3",
+        "usage": {
+          "input_tokens": 17444,
+          "cache_read_input_tokens": 28544,
+          "cache_creation_input_tokens": 0,
+          "output_tokens": 148,
+          "reasoning_tokens": 67,
+          "total_tokens": 46136
+        },
+        "num_turns": 2,
+        "total_cost_usd": 0.050048,
+        "total_cost_usd_ticks": 500480000,
+        "modelUsage": {
+          "grok-4.7-build": {
+            "inputTokens": 17444,
+            "outputTokens": 148,
+            "cacheReadInputTokens": 28544,
+            "cacheCreationInputTokens": 0,
+            "modelCalls": 2,
+            "costUSD": 0.050048
+          }
+        }
+      }
+    }
+  ]
+}

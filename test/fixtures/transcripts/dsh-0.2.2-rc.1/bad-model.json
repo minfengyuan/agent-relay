@@ -1,0 +1,92 @@
+{
+  "scenario": "S2-5 agent-default-model override with unknown model",
+  "command": "dsh",
+  "args": [
+    "--profile",
+    "headless",
+    "--patch",
+    "<SPIKE>/dsh-policy-full.yml",
+    "--patch",
+    "<SPIKE>/dsh-badmodel.yml",
+    "--json",
+    "--permission-mode",
+    "workspace-write",
+    "--approval-policy",
+    "never",
+    "-"
+  ],
+  "stdin": "Read the file a.txt in the current directory and reply with its exact contents only.",
+  "signalSentMs": null,
+  "exitMs": 1914,
+  "exitCode": 1,
+  "exitSignal": null,
+  "stderr": "[llm-deepseek-api-key] model listing from https://api.deepseek.com/models loaded 2 model(s), skipped 0 row(s)\ndsh: INVALID_REQUEST: The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed no-such-model-xyz. (request_id: 39a13d98-a7c4-474b-87fa-f3ab70589522)\n",
+  "lines": [
+    {
+      "t": 1467,
+      "json": {
+        "type": "session",
+        "sessionId": "session-9e127f95-e23a-4c7e-9826-4b7d3070042b",
+        "cwd": "<SPIKE>/ws7"
+      }
+    },
+    {
+      "t": 1468,
+      "json": {
+        "type": "status",
+        "phase": "turn_start",
+        "turn": 1
+      }
+    },
+    {
+      "t": 1532,
+      "json": {
+        "type": "status",
+        "phase": "step_start",
+        "turn": 1,
+        "step": 1
+      }
+    },
+    {
+      "t": 1848,
+      "json": {
+        "type": "status",
+        "phase": "step_end",
+        "turn": 1,
+        "step": 1
+      }
+    },
+    {
+      "t": 1849,
+      "json": {
+        "type": "status",
+        "phase": "turn_end",
+        "turn": 1,
+        "reason": {
+          "kind": "error",
+          "error": {
+            "message": "The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed no-such-model-xyz. (request_id: 39a13d98-a7c4-474b-87fa-f3ab70589522)",
+            "code": "INVALID_REQUEST",
+            "status": 400
+          }
+        }
+      }
+    },
+    {
+      "t": 1855,
+      "json": {
+        "type": "final",
+        "sessionId": "session-9e127f95-e23a-4c7e-9826-4b7d3070042b",
+        "reason": {
+          "kind": "error",
+          "error": {
+            "message": "The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed no-such-model-xyz. (request_id: 39a13d98-a7c4-474b-87fa-f3ab70589522)",
+            "code": "INVALID_REQUEST",
+            "status": 400
+          }
+        },
+        "text": ""
+      }
+    }
+  ]
+}

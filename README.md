@@ -4,7 +4,7 @@
 
 Run **Grok**, **Cursor**, **OpenCode**, **DSH**, **Codex**, and **Claude Code** through one local MCP server from any MCP client that supports stdio.
 
-`agent-relay` bridges MCP tool calls to local coding agents through ACP or the native Codex app-server. The calling client handles orchestration and review; the relay runs one non-interactive agent turn and returns bounded output together with a resumable session ID.
+`agent-relay` bridges MCP tool calls to local coding agents through ACP, the native Codex app-server, or a provider's headless JSON transport. The calling client handles orchestration and review; the relay runs one non-interactive agent turn and returns bounded output together with a resumable session ID.
 
 ## Why use it?
 
@@ -23,7 +23,7 @@ Run **Grok**, **Cursor**, **OpenCode**, **DSH**, **Codex**, and **Claude Code** 
 | OpenCode | `opencode_delegate` | Coding tasks with optional model/effort/agent selection |
 | DSH | `dsh_delegate` | Coding tasks through DeepSeek Harness |
 | Codex | `codex_delegate` | Coding tasks through the native Codex app-server |
-| Claude Code | `claude_delegate` | Coding tasks through the Claude Agent ACP bridge |
+| Claude Code | `claude_delegate` | Coding tasks through the Claude Code headless CLI |
 
 ## Quick start
 
@@ -69,7 +69,7 @@ For clients using an `mcpServers` JSON configuration, the following is an exampl
 }
 ```
 
-Cursor requires an explicit executable path. Grok, OpenCode, DSH, Codex, and Claude Code default to `grok`, `opencode`, `dsh`, `codex`, and `claude-agent-acp` on PATH. You only need to install and authenticate the agents you intend to call. Claude Code requires the separate ACP bridge described below.
+Cursor requires an explicit executable path. Grok, OpenCode, DSH, Codex, and Claude Code default to `grok`, `opencode`, `dsh`, `codex`, and `claude` on PATH. You only need to install and authenticate the agents you intend to call. Claude Code now uses its native CLI; the separate ACP bridge is no longer needed.
 
 The relay uses stdio, with stdout reserved for MCP messages. Tasks default to a one-hour total timeout. Set the client's tool-call timeout to at least 3660 seconds when available, and keep it above any custom relay total timeout. Client timeout and progress settings are client-specific.
 
@@ -159,6 +159,20 @@ Calling client integrates or follows up
 
 Use separate worktrees for independent parallel tasks. Only one task may be active per resolved working directory; overlapping calls to that directory return `WORKSPACE_BUSY`.
 
+### Grok
+
+The transcript baseline is Grok 1.0.77. Child arguments changed from ACP `agent stdio` to top-level headless options. If `AGENT_RELAY_GROK_COMMAND` selects a wrapper, update it to forward the new arguments instead of injecting ACP arguments. MCP tool names, inputs, and result fields are unchanged.
+
+Grok uses headless streaming JSON (`--output-format streaming-json`), with the CLI's existing authentication. Each headless run starts its own daemon even when leader mode is enabled in user configuration; the relay does not connect to a shared leader or pass the ACP-only `--no-leader` flag.
+
+The relay keeps `--sandbox workspace`, disabled built-in web search/fetch, explicit `WebFetch`/`WebSearch` deny rules, and `--always-approve`. It also passes `--disallowed-tools ask_user_question` and `--no-wait-for-background` for unattended work. Grok state and temporary directories remain writable, and shell networking remains available. These settings do not isolate external MCP services.
+
+Tasks are written verbatim to a private `0600` file and passed with `--prompt-file`; prompt text is not placed in argv. New sessions use a relay-generated UUID with `-s`, persisted after the first event. Resume passes only a relay-recorded UUID with `-r` and the same resolved `--cwd`, avoiding Grok's title matching. Existing ACP UUIDs remain usable through the root `sessions/` namespace. An unknown provider session returns `UNKNOWN_SESSION` without creating a replacement; a `Not signed in` error returns `AUTH_UNAVAILABLE`.
+
+Results retain the common fields only: text is assembled from `text` events, and `stopReason` comes from `end`. Tool events provide progress but no tool or usage summaries. Success requires an `end` event, a stop reason other than `cancelled`, exit code `0`, and no error event. A defensive stderr `permission required:` diagnostic returns `UNEXPECTED_PERMISSION`, including when the CLI exits `0`.
+
+Cancellation first sends SIGTERM and allows at least 12 seconds for Grok to exit before process-tree termination. Grok can emit `end{cancelled}` before its daemon exits, so the relay also waits for exit within that grace. Grok's tool shells run in separate process groups: only Grok's own graceful shutdown reaps those children; force-killing its original process group cannot guarantee cleanup of escaped groups. DSH detached tool groups have the same limitation. Wait for the call to finish before resuming.
+
 ### OpenCode
 
 The relay starts `opencode acp` for both V1 and V2. It sets the child working directory and sends the absolute `cwd` in ACP session requests. It does not pass `--cwd`, which OpenCode V2 rejects. Use `AGENT_RELAY_OPENCODE_COMMAND` to select another executable. Sign in with `opencode auth login` before delegation; the relay uses existing provider credentials and does not open an interactive login.
@@ -188,6 +202,22 @@ Run `pnpm test:real:opencode` for authenticated V2 smoke tests. They call the co
 
 On November 3, 2026, all six real smoke tests passed on macOS with OpenCode 2.0.12 and the configured `opencode/pulse-alpha-free` model under the previous `allow_once` policy. The question-tool probe returned `stopReason: "cancelled"` without user input. The new refusal policy has not been revalidated with a real provider. V1 and Windows real execution remain unverified.
 
+### DSH
+
+The transcript baseline is DSH 0.2.2-rc.1. Child arguments changed from `--profile acp` to `--profile headless --patch <permissions> [--patch <model>] --json --permission-mode workspace-write --approval-policy never [--session-id <id>] -`. Update wrappers selected by `AGENT_RELAY_DSH_COMMAND` to forward these arguments and stdin. Permission denials are now detected after the turn rather than aborting on the first ACP request; review partial output because the model can continue.
+
+The relay runs `dsh --profile headless` and reads newline-delimited JSON events. Relay-owned `--patch` files follow `--profile headless` and precede application flags: a `0600` permissions patch, plus an optional `0600` model-route patch. The relay does not edit `$DSH_HOME/profiles/headless/cordis.patch.yml`. The task is written to stdin and is not exposed in argv.
+
+The permissions patch keeps approval, permission, and `tool-web` policy, removes the profile's `sandbox-policy` overlay, and re-enables the bundled `credentials`, `authorization`, and `deepseek-account` services. Saved credentials are preferred. If they are unavailable, DSH falls back to the launch environment, then `<cwd>/.env`, then `$DSH_HOME/.env`. An empty `DEEPSEEK_API_KEY` is removed from the child environment so it cannot mask the `.env` fallback; the relay does not set or read a nonempty value. The parent environment is unchanged.
+
+Inputs are `task`, absolute `cwd`, and optional `sessionId`, `model`, and `reasoningEffort`. When model or effort is requested, the relay first runs `dsh --profile headless --patch <permissions> --dump-config` under the same workspace lease and timeout, and reads `agent-default-model.provider`. Unparsable output returns `INVALID_CONFIG`; a preflight timeout returns `CONFIG_TIMEOUT`. The relay does not validate model names locally. DSH reports an unknown model as its generic `INVALID_REQUEST`, which the relay returns as `ACP_FAILURE` with the DSH code and message. On resume, an omitted `reasoningEffort` keeps a saved explicit effort only when the provider/model route is unchanged.
+
+Every new and resumed turn explicitly uses `--permission-mode workspace-write --approval-policy never`. Built-in web search and fetch are disabled. Shell networking and external MCP services remain available, so this is not network isolation. Recognized `FS_SANDBOX_DENIED` and `AUTO_REVIEW_DENIED` tool results fail the turn with `PERMISSION_REQUIRED` after it finishes, preserving later text. A shell command denied by the sandbox returns a completed tool result without an error code; the relay detects it from DSH's `[sandbox: file access denied under …]` result marker and also returns `PERMISSION_REQUIRED`. A command that prints this marker itself is treated the same way. Other tool errors are not treated as permission failures. A completed `tool_result` means the tool returned; it does not prove that a shell command exited successfully.
+
+Only exit code `0` with `final.reason.kind: "completed"` succeeds. Result text comes from the bounded `final.text`; DSH tool calls are summarized and usage is omitted. A missing credential maps to `AUTH_UNAVAILABLE`. Unknown-session and cwd-mismatch messages map to `UNKNOWN_SESSION` and `CWD_MISMATCH`; other turn or startup failures use `ACP_FAILURE`. SIGTERM cancellation waits for the configured grace, then terminates the remaining process tree. Wait for the call to finish before resuming because the workspace lease is released only after cleanup is confirmed.
+
+Sessions use the existing `sessions/dsh` namespace. Bare UUIDs from the previous ACP integration can resume under the same resolved working directory. The relay passes only confirmed IDs as `--session-id` and repeats the permission and approval flags on every resumed turn.
+
 ### Codex
 
 Install and authenticate the Codex CLI before calling `codex_delegate`; no ACP bridge package is needed. The relay launches `codex app-server --listen stdio://` directly and uses the CLI's existing authentication. It does not initiate login. Protocol compatibility is based on Codex CLI 0.163.0; older versions are unverified. On Windows, point `AGENT_RELAY_CODEX_COMMAND` at a native `codex.exe`; `.cmd`/`.bat` launchers are unsupported.
@@ -210,26 +240,34 @@ Run the opt-in authenticated smoke with `pnpm test:real:codex` (or `RUN_CODEX_RE
 
 ### Claude Code
 
-Install the ACP bridge separately; `@agentclientprotocol/claude-agent-acp@0.100.0` is the integration baseline:
+Install and authenticate the Claude Code CLI. The hermetic integration baseline is Claude Code 2.1.318.
 
-```bash
-npm install -g @agentclientprotocol/claude-agent-acp@0.100.0
-claude-agent-acp --cli auth login
+`AGENT_RELAY_CLAUDE_COMMAND` now selects the **Claude Code CLI executable** and defaults to `claude`. This is a breaking configuration change: a value that still points at `claude-agent-acp` is not a valid replacement. The relay preserves the local CLI environment, hooks, skills, plugins, native allow rules, and MCP configuration. It does not install software or start interactive login during delegation.
+
+Each invocation uses this headless shape:
+
+```text
+claude -p --output-format stream-json --verbose \
+  --permission-mode acceptEdits --permission-prompts none \
+  [--model MODEL] [--effort EFFORT] \
+  [--session-id UUID | --resume UUID]
 ```
 
-The bridge uses the Claude Agent SDK and its bundled native Claude executable. Existing compatible local authentication or provider environment credentials can be used. To use another native executable, set the upstream `CLAUDE_CODE_EXECUTABLE` to its absolute path. `AGENT_RELAY_CLAUDE_COMMAND` selects the **bridge**, not the native `claude` command. The relay does not install software or start interactive login during delegation.
+The task is written to stdin, not exposed in argv. `claude_delegate` accepts `task`, absolute `cwd`, and optional `sessionId`, `model`, and `effort`.
 
-`claude_delegate` accepts `task`, absolute `cwd`, and optional `sessionId`, `model`, and `effort`. Model/effort values must be advertised `configOptions`; the relay sets model before effort and refreshes options after each change. Omitted options preserve provider state. Invalid or unavailable options return `INVALID_CONFIG` or `CONFIG_UNSUPPORTED`.
+The relay validates `effort` locally against `low`, `medium`, `high`, `xhigh`, and `max`; an invalid value returns `INVALID_CONFIG` before the process starts, because Claude otherwise silently ignores an unknown effort. There is no reliable local model validation: the relay passes `model` unchanged, and behavior depends on the configured gateway. An unknown model may succeed, be ignored, or fail at runtime.
 
-Every new or restored session is explicitly set to `acceptEdits` before prompting. Edits can run directly, while additional ACP approval requests are rejected with `PERMISSION_REQUIRED` and available partial output. The relay advertises no terminal authentication, file/terminal services, or elicitation UI; the baseline bridge disables `AskUserQuestion` without form support. Native allow rules, hooks, shell networking and external MCP services still apply. This is not filesystem or network isolation.
+Sessions keep the separate `claude` namespace and shared cross-provider workspace locks. A new relay UUID is passed to `--session-id` and persisted when `system/init` arrives, before the model call. Resume passes only a relay-recorded UUID with `--resume` in the original `cwd`; title matching is never used, and an unknown session returns `UNKNOWN_SESSION` without creating a replacement.
 
-Sessions use a separate `claude` namespace and the same cross-provider workspace locks. Only relay-confirmed IDs can be restored from the original `cwd`. Resume is preferred; load is used only when resume is not advertised. A failed restore never creates a replacement session. New IDs are persisted before configuration so configuration errors can return a resumable ID. ACP authentication-required errors return `AUTH_UNAVAILABLE`; sign in outside the relay and retry the confirmed session when available.
+Compatibility with ACP-created Claude sessions is assumed, not measured. The relay retains `sessions/claude`; if the native CLI cannot restore an old UUID, it returns `UNKNOWN_SESSION` without substituting a new conversation. Grok ACP-session compatibility was measured, and DSH accepts both bare ACP UUIDs and native headless IDs in the same resolved cwd.
 
-The bridge must advertise `session/close`. The relay closes the session, confirms process-tree cleanup, and only then releases the workspace lock. Results include `provider: "claude"` and the common result fields, with optional bounded tool-call and ACP usage summaries.
+With `--permission-prompts none`, actions that require approval are denied automatically. Claude reports them in `result.permission_denials`; the relay finishes the turn and returns `PERMISSION_REQUIRED` with available text and bounded tool summaries. This is a behavior change from ACP: the first denial no longer aborts immediately, and the model may continue with other work after a denied tool. Native allow rules, hooks, shell networking, and external MCP services still apply. `acceptEdits` is not filesystem or network isolation.
 
-On Windows, supported npm/pnpm `.cmd` shims are resolved to a verified package `bin.claude-agent-acp` entry and run with Node, without a shell. Native `.exe`/`.com` and explicit `.js`/`.mjs` launchers are also supported. Arbitrary batch scripts are rejected.
+A turn succeeds only when the terminal `result` has `is_error: false` and the process exits `0`. `error_during_execution`, `error_max_turns`, unknown-session errors, authentication failures, and a SIGTERM exit `143` without a `result` line are failures. Cancellation sends SIGTERM, waits up to 5 seconds, then confirms process-tree cleanup. Results include `provider: "claude"` and the common fields with optional bounded `toolCalls`; CLI token counters do not map to the relay's `used`/`size` usage shape, so `usage` is omitted.
 
-Run the opt-in authenticated smoke with `pnpm test:real:claude` (or `RUN_CLAUDE_REAL_TESTS=1 pnpm exec vitest run test/claude-real-smoke.test.ts`). Optional `CLAUDE_TEST_MODEL` and `CLAUDE_TEST_EFFORT` exercise explicit configuration. The smoke uses a disposable workspace, edits files, restores the conversation across processes, and checks lock release. It requires authentication and may consume model allowance; default tests use a fake bridge.
+On Windows, supported npm/pnpm `.cmd` shims are resolved to a verified `@anthropic-ai/claude-code` `bin.claude` entry and run with Node, without a shell. Native `.exe`/`.com` and explicit `.js`/`.mjs` launchers are also supported. Arbitrary batch scripts are rejected.
+
+Run the opt-in authenticated smoke with `pnpm test:real:claude` (or `RUN_CLAUDE_REAL_TESTS=1 pnpm exec vitest run test/claude-real-smoke.test.ts`). Optional `CLAUDE_TEST_MODEL` and `CLAUDE_TEST_EFFORT` exercise explicit CLI arguments. The smoke uses a disposable workspace, edits files, restores the conversation across processes, and checks lock release. It requires authentication and may consume model allowance; default tests replay committed transcripts.
 
 ### Native permission policy
 
@@ -241,18 +279,18 @@ The relay applies provider-specific native permission controls. These controls a
 | Grok | `--sandbox workspace`, `--disable-web-search`, `WebFetch`/`WebSearch` deny rules; retains `--always-approve` inside the sandbox | Grok state directories and temp remain writable; the workspace profile permits child network access. Custom network restrictions are Linux-only, not equivalent on macOS |
 | Cursor | `--sandbox enabled --workspace <cwd>`, `approvalMode: allowlist`, `sandbox.networkAccess: user_config_only`, `WebFetch(*)` denied | Custom sandbox network allowlists and local/team policy still apply; this is not a blanket network block |
 | OpenCode | Forces V1 `OPENCODE_PERMISSION` entries `question`, `external_directory`, `webfetch`, and `websearch` to `deny`; refuses extra ACP approvals in both versions | No V2 permission translation; V2's own configuration still applies. No OS sandbox: shell, plugins and external MCP tools can write outside the workspace or use the network. V1 external-directory denial also restricts supported external reads |
-| DSH | Native `--patch` sets sandbox mode and new-session default preset to `workspace-write`, approval to `ask`, and disables `web_search`/`web_fetch` | The file sandbox does not restrict shell networking. Resumed sessions retain saved sandbox mode; ACP cannot verify or reset it. Windows ACL and older Linux Landlock backends may provide partial file enforcement |
-| Claude Code | Sets `acceptEdits` on new/restored sessions and rejects extra ACP approvals | No filesystem or network isolation; native allow rules, hooks, shell networking and external MCP services still apply |
+| DSH | Headless `--patch` enforces `workspace-write`, `--approval-policy never`, and disabled `web_search`/`web_fetch` on new and resumed turns; credential-store services are restored | The file sandbox does not restrict shell networking. Shell-internal denials are detected only from DSH's result marker text. Windows ACL and older Linux Landlock backends may provide partial file enforcement |
+| Claude Code | `acceptEdits` plus `--permission-prompts none` on new and resumed turns; denied tools are reported after the turn | No filesystem or network isolation; the model may continue after a denial. Native allow rules, hooks, shell networking and external MCP services still apply |
 
 **OpenCode behavior change:** permission requests are no longer automatically granted with `allow_once`. The relay selects `reject_once` when offered, otherwise cancels, and returns `PERMISSION_REQUIRED` with available partial output.
 
 Cursor uses a private snapshot of its CLI configuration under the relay state directory. Existing CLI settings, authentication-related configuration, environment credentials and normal OS credential discovery are retained. Only the permission/sandbox settings above are overridden, with missing schema defaults supplied. The source CLI configuration and project files are not edited. `CURSOR_CONFIG_DIR` or `XDG_CONFIG_HOME` locates the source CLI configuration; the normal data directory and model/API connection remain unchanged.
 
-DSH receives a private file containing the relay's bundled native patch, appended after other launch arguments. User profiles are not edited; `DSH_PERMISSION_MODE` is set only in the child environment. Native configuration files are removed after confirmed process cleanup, including startup failure, cancellation and timeout; they are retained if cleanup cannot be confirmed. Preparation errors fail structurally without an unrestricted retry. A process crash may leave private directories behind; remove them only after confirming no worker still uses them.
+DSH receives private files containing the relay's bundled native and optional model patches. They are passed immediately after `--profile headless`, before application flags. User profiles are not edited; `DSH_PERMISSION_MODE` is set only in the child environment. Native configuration files are removed after confirmed process cleanup, including startup failure, cancellation and timeout; they are retained if cleanup cannot be confirmed. Preparation errors fail structurally without an unrestricted retry. A process crash may leave private directories behind; remove them only after confirming no worker still uses them.
 
-Grok, Cursor, OpenCode, DSH and Claude Code emit one bounded stderr diagnostic per execution describing policy limits. DSH resume diagnostics explicitly state that saved-session permissions are not unified. Diagnostics contain no credentials or task text. External MCP services are not isolated by these settings. Custom executables/wrappers must honor native arguments and configuration; overriding the executable is not proof of enforcement.
+Cursor, OpenCode, and DSH emit one bounded stderr diagnostic per execution describing policy limits. Diagnostics contain no credentials or task text. External MCP services are not isolated by these settings. Custom executables/wrappers must honor native arguments and configuration; overriding the executable is not proof of enforcement.
 
-The policy targets macOS, Linux and Windows through each provider's supported backends; launcher support does not prove sandbox availability. Hermetic tests verify configuration and refusal behavior, not real CLI isolation. Real CLI checks remain opt-in: use a disposable workspace to check internal/external writes, shell networking, web tools and resumed sessions, recording the OS, CLI version and observed result. Unrun platforms and capabilities remain unverified.
+The policy targets macOS, Linux and Windows through each provider's supported backends; launcher support does not prove sandbox availability. Hermetic tests verify configuration and refusal behavior, not real CLI isolation. On Windows, the Grok, DSH, and Claude Code headless CLIs exit by themselves when a turn ends. The relay then counts the CLI's own exit as cleanup, because the descendants of an exited root cannot be found; a background process that outlives the CLI is not stopped. Cancellation and timeout skip the graceful signal on Windows and stop the whole tree with `taskkill /T /F` while the CLI is still running. Real CLI checks remain opt-in: use a disposable workspace to check internal/external writes, shell networking, web tools and resumed sessions, recording the OS, CLI version and observed result. Unrun platforms and capabilities remain unverified.
 
 ## Configuration
 
@@ -265,7 +303,7 @@ Set these environment variables on the MCP server process:
 | `AGENT_RELAY_OPENCODE_COMMAND` | `opencode` | OpenCode executable |
 | `AGENT_RELAY_DSH_COMMAND` | `dsh` | DSH executable |
 | `AGENT_RELAY_CODEX_COMMAND` | `codex` | Native Codex executable |
-| `AGENT_RELAY_CLAUDE_COMMAND` | `claude-agent-acp` | Claude ACP bridge executable |
+| `AGENT_RELAY_CLAUDE_COMMAND` | `claude` | Claude Code CLI executable |
 | `AGENT_RELAY_STATE_DIR` | `~/.local/agent-relay` | Session metadata and workspace locks |
 | `AGENT_RELAY_PHASE_TIMEOUT_MS` | `30000` | Protocol phase timeout |
 | `AGENT_RELAY_TOTAL_TIMEOUT_MS` | `3600000` | Total task timeout |
@@ -307,4 +345,4 @@ pnpm test
 pnpm build
 ```
 
-The default suite uses fake ACP agents and a fake Codex app-server. Real-agent smoke tests are opt-in; see [`test/AGENTS.md`](test/AGENTS.md).
+The default suite uses fake ACP agents, a fake Codex app-server, and committed headless transcript replays. Real-agent smoke tests are opt-in; see [`test/AGENTS.md`](test/AGENTS.md). Grok/DSH/Claude smoke tests check the exact baseline CLI version and observed event types against the committed transcripts. Unexpected types or versions fail the smoke check for review; production continues to ignore unknown event types.

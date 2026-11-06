@@ -6,8 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ProcessTree from "../src/runner/process-tree.js";
 import { SessionStore, type WorkspaceLease } from "../src/store.js";
 import { RelayFailure } from "../src/types.js";
-import { GrokRunner, cleanupAllChildren } from "../src/runner.js";
-import { baseConfig, cleanupDirs, clearDelegatedEnv, tempDir, waitForLog } from "./helpers.js";
+import { cleanupAllChildren } from "../src/runner.js";
+import { TestAcpRunner, baseConfig, cleanupDirs, clearDelegatedEnv, tempDir, waitForLog } from "./helpers.js";
 
 const state = vi.hoisted(() => ({
   children: [] as ChildProcessWithoutNullStreams[],
@@ -79,7 +79,7 @@ async function setup(fail: keyof WorkspaceLease, onFailure?: () => void) {
   vi.stubEnv("XAI_API_KEY", "");
   const root = await tempDir(dirs), cwd = await tempDir(dirs);
   const store = new FaultStore(root, fail, onFailure);
-  const runner = new GrokRunner(baseConfig(root), store);
+  const runner = new TestAcpRunner(baseConfig(root), store);
   const owner = join(root, "locks", `${createHash("sha256").update(cwd).digest("hex")}.lock`, "owner.json");
   return { root, cwd, store, runner, owner };
 }
@@ -89,7 +89,7 @@ describe("runner lease persistence faults", () => {
     vi.stubEnv("FAKE_ACP_MODE", "hang"); vi.stubEnv("XAI_API_KEY", "");
     const root = await tempDir(dirs), cwd = await tempDir(dirs), log = join(root, "retry-cancel.log");
     vi.stubEnv("FAKE_ACP_LOG", log);
-    const task = new GrokRunner(baseConfig(root), new SessionStore(root)).delegate({ task: "hang", cwd });
+    const task = new TestAcpRunner(baseConfig(root), new SessionStore(root)).delegate({ task: "hang", cwd });
     const outcome = task.catch((error: unknown) => error);
     await waitForLog(log, "prompt:fake-session-1");
     state.rejectCancelOnce = true;

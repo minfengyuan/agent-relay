@@ -1,0 +1,33 @@
+{
+  "scenario": "Resume a session recorded under another cwd",
+  "command": "dsh",
+  "args": [
+    "--profile",
+    "headless",
+    "--patch",
+    "<SPIKE>/dsh-policy-new.yml",
+    "--json",
+    "--permission-mode",
+    "workspace-write",
+    "--approval-policy",
+    "never",
+    "--session-id",
+    "f25f9010-0f22-4e8e-a056-d09fad16ec5e",
+    "-"
+  ],
+  "stdin": "Read the file a.txt in the current directory and reply with its exact contents only.",
+  "signalSentMs": null,
+  "exitMs": 877,
+  "exitCode": 1,
+  "exitSignal": null,
+  "stderr": "dsh: session \"f25f9010-0f22-4e8e-a056-d09fad16ec5e\" was recorded in \"<TMP>\", not \"<SPIKE>/ws\"\n",
+  "lines": [
+    {
+      "t": 859,
+      "json": {
+        "type": "error",
+        "message": "session \"f25f9010-0f22-4e8e-a056-d09fad16ec5e\" was recorded in \"<TMP>\", not \"<SPIKE>/ws\""
+      }
+    }
+  ]
+}

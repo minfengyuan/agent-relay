@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { beginRunnerShutdown, CodexRunner, GrokRunner } from "../src/runner.js";
+import { beginRunnerShutdown, CodexRunner } from "../src/runner.js";
 import { SessionStore } from "../src/store.js";
-import { baseConfig, cleanupDirs, clearDelegatedEnv, tempDir, waitForLog } from "./helpers.js";
+import { TestAcpRunner, baseConfig, cleanupDirs, clearDelegatedEnv, tempDir, waitForLog } from "./helpers.js";
 
 it("shuts down native and ACP workers together and rejects new Codex tasks", async () => {
   clearDelegatedEnv();
@@ -15,7 +15,7 @@ it("shuts down native and ACP workers together and rejects new Codex tasks", asy
   vi.stubEnv("FAKE_ACP_LOG", acpLog);
   const runner = new CodexRunner(config, new SessionStore(state, "codex"));
   const native = runner.delegate({ task: "hang", cwd }).catch((error: unknown) => error);
-  const acp = new GrokRunner(config, new SessionStore(state)).delegate({ task: "hang", cwd: other }).catch((error: unknown) => error);
+  const acp = new TestAcpRunner(config, new SessionStore(state)).delegate({ task: "hang", cwd: other }).catch((error: unknown) => error);
   try {
     await Promise.all([waitForLog(log, '"prompt":"hang"'), waitForLog(acpLog, "prompt:fake-session-1")]);
     const shutdown = beginRunnerShutdown();

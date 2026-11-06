@@ -1,0 +1,90 @@
+{
+  "scenario": "Resume an ACP-created session (bare UUID) from the same cwd",
+  "command": "dsh",
+  "args": [
+    "--profile",
+    "headless",
+    "--patch",
+    "<SPIKE>/dsh-policy-new.yml",
+    "--json",
+    "--permission-mode",
+    "workspace-write",
+    "--approval-policy",
+    "never",
+    "--session-id",
+    "1f3d300b-790f-4919-9f35-87e986affc0a",
+    "-"
+  ],
+  "stdin": "Read the file a.txt in the current directory and reply with its exact contents only.",
+  "signalSentMs": null,
+  "exitMs": 957,
+  "exitCode": 1,
+  "exitSignal": null,
+  "stderr": "dsh: MISSING_CREDENTIAL: llm-deepseek: no API key for provider route \"deepseek-official\"; store DEEPSEEK_API_KEY through the credentials service (the web Models page writes it), or export DEEPSEEK_API_KEY in the launching environment\n",
+  "lines": [
+    {
+      "t": 866,
+      "json": {
+        "type": "session",
+        "sessionId": "1f3d300b-790f-4919-9f35-87e986affc0a",
+        "cwd": "<SPIKE>/ws2"
+      }
+    },
+    {
+      "t": 867,
+      "json": {
+        "type": "status",
+        "phase": "turn_start",
+        "turn": 2
+      }
+    },
+    {
+      "t": 904,
+      "json": {
+        "type": "status",
+        "phase": "step_start",
+        "turn": 2,
+        "step": 1
+      }
+    },
+    {
+      "t": 914,
+      "json": {
+        "type": "status",
+        "phase": "step_end",
+        "turn": 2,
+        "step": 1
+      }
+    },
+    {
+      "t": 914,
+      "json": {
+        "type": "status",
+        "phase": "turn_end",
+        "turn": 2,
+        "reason": {
+          "kind": "error",
+          "error": {
+            "message": "llm-deepseek: no API key for provider route \"deepseek-official\"; store DEEPSEEK_API_KEY through the credentials service (the web Models page writes it), or export DEEPSEEK_API_KEY in the launching environment",
+            "code": "MISSING_CREDENTIAL"
+          }
+        }
+      }
+    },
+    {
+      "t": 917,
+      "json": {
+        "type": "final",
+        "sessionId": "1f3d300b-790f-4919-9f35-87e986affc0a",
+        "reason": {
+          "kind": "error",
+          "error": {
+            "message": "llm-deepseek: no API key for provider route \"deepseek-official\"; store DEEPSEEK_API_KEY through the credentials service (the web Models page writes it), or export DEEPSEEK_API_KEY in the launching environment",
+            "code": "MISSING_CREDENTIAL"
+          }
+        },
+        "text": ""
+      }
+    }
+  ]
+}

@@ -8,7 +8,7 @@ import { cleanupAllChildren, ClaudeRunner, CodexRunner } from "../src/runner.js"
 import { createRelayServer } from "../src/server.js";
 import { RelayFailure } from "../src/types.js";
 import { SessionStore } from "../src/store.js";
-import { claudeFixture, clearDelegatedEnv, codexFixture, dshFixture, grokFixture, opencodeFixture, waitForLog } from "./helpers.js";
+import { claudeFixture, clearDelegatedEnv, codexFixture, dshFixture, grokHeadlessFixture, opencodeFixture, waitForLog } from "./helpers.js";
 
 const dirs: string[] = [];
 beforeEach(() => {
@@ -61,7 +61,7 @@ describe("MCP server", () => {
   it.each(["local-tool-client", "custom-orchestrator"])("accepts %s as the calling MCP client", async (name) => {
     const { server, clientTransport, request, init } = await harness({
       command: process.execPath,
-      commandArgs: [grokFixture],
+      commandArgs: [grokHeadlessFixture],
     }, { name, version: "1" });
     try {
       expect(init).toHaveProperty("result.serverInfo.name", "agent-relay");
@@ -71,7 +71,7 @@ describe("MCP server", () => {
         name: "grok_delegate", arguments: { task: "hello", cwd: process.cwd() },
       }) as { result?: { isError?: boolean; content?: Array<{ text?: string }>; structuredContent?: unknown } };
       expect(response.result?.isError).not.toBe(true);
-      expect(response.result?.structuredContent).toMatchObject({ sessionId: "fake-session-1" });
+      expect(response.result?.structuredContent).toMatchObject({ sessionId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
       expect(JSON.parse(response.result?.content?.[0]?.text ?? "null")).toEqual(response.result?.structuredContent);
     } finally {
       await clientTransport.close();
@@ -137,7 +137,7 @@ describe("MCP server", () => {
       claudeCommand: process.execPath, claudeCommandArgs: [claudeFixture], cancelGraceMs: 100, progressIntervalMs: 1,
     });
     const log = join(stateDir, "claude.log");
-    vi.stubEnv("FAKE_ACP_LOG", log);
+    vi.stubEnv("FAKE_CLAUDE_LOG", log);
     type Response = { result?: { isError?: boolean; content?: Array<{ text: string }>; structuredContent?: Record<string, unknown> } };
     const call = async (id: number, args: Record<string, unknown>) => {
       const response = await request(id, "tools/call", {
@@ -149,12 +149,20 @@ describe("MCP server", () => {
     try {
       const created = await call(3, { task: "hello", model: "sonnet", effort: "high" });
       expect(created.result?.isError).not.toBe(true);
-      expect(created.result?.structuredContent).toMatchObject({ provider: "claude", text: "fresh answer", usage: { used: 42 } });
-      expect(await readFile(log, "utf8")).toContain("set:model:sonnet\nset:effort:high\nset:mode:acceptEdits");
+      expect(created.result?.structuredContent).toMatchObject({
+        provider: "claude", text: "hello-spike", stopReason: "end_turn",
+        toolCalls: [{ title: "Read" }, { status: "completed" }],
+      });
+      const spawn = JSON.parse((await readFile(log, "utf8")).split("\n")[0]!) as { args: string[]; id: string };
+      expect(spawn.args).toContain("--model");
+      expect(spawn.args).toContain("sonnet");
+      expect(spawn.args).toContain("--effort");
+      expect(spawn.args).toContain("high");
       expect(notifications).toContainEqual(expect.objectContaining({
         method: "notifications/progress", params: expect.objectContaining({ progressToken: 73 }),
       }));
       const sessionId = created.result?.structuredContent?.sessionId;
+      expect(sessionId).toBe(spawn.id);
       expect((await call(4, { task: "again", sessionId })).result?.structuredContent).toMatchObject({ sessionId });
       for (const [requestId, args, code] of [
         [5, { task: "hello", sessionId: "unknown" }, "UNKNOWN_SESSION"],
@@ -164,23 +172,30 @@ describe("MCP server", () => {
           provider: "claude", sessionId: null, error: { code },
         });
       }
-      vi.stubEnv("FAKE_ACP_MODE", "permission");
+      vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "permission-denied-continues");
       const rejected = await call(7, { task: "hello", sessionId });
       expect(rejected.result?.isError).toBe(true);
       expect(rejected.result?.structuredContent).toMatchObject({
-        provider: "claude", sessionId, text: "fresh answer",
-        toolCalls: [{ toolCallId: "tool-1", title: "Fake tool", status: "completed" }],
-        usage: { used: 42 }, error: { code: "PERMISSION_REQUIRED" },
+        provider: "claude", sessionId, text: expect.stringContaining("b.txt"),
+        error: { code: "PERMISSION_REQUIRED", message: expect.stringContaining("Bash") },
       });
-      vi.stubEnv("FAKE_ACP_LOG", join(stateDir, "cancel.log"));
-      vi.stubEnv("FAKE_ACP_MODE", "hang");
+      expect(rejected.result?.structuredContent?.toolCalls).toEqual([
+        { toolCallId: "call_00_FmnQtuplrg74S1JOc49s6145", title: "Bash" },
+        { toolCallId: "call_00_FmnQtuplrg74S1JOc49s6145", status: "failed" },
+        { toolCallId: "toolu_013xEx22fgxQ6QdQhaQr9Kbk", title: "Write" },
+        { toolCallId: "toolu_013xEx22fgxQ6QdQhaQr9Kbk", status: "completed" },
+        { toolCallId: "call_00_FmnQtuplrg74S1JOc49s6145", status: "failed" },
+      ]);
+      vi.stubEnv("FAKE_CLAUDE_LOG", join(stateDir, "cancel.log"));
+      vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "sigterm-during-tool");
       const delegate = vi.spyOn(ClaudeRunner.prototype, "delegate");
       void call(8, { task: "hang", sessionId });
-      await waitForLog(join(stateDir, "cancel.log"), "prompt:claude-session");
+      await waitForLog(join(stateDir, "cancel.log"), "waiting");
       const outcome = (delegate.mock.results[0]?.value as Promise<unknown>).catch((error: unknown) => error);
       await notify("notifications/cancelled", { requestId: 8, reason: "test" });
       expect(await outcome).toMatchObject({ code: "CANCELLED", partial: { provider: "claude", sessionId } });
-      await waitForLog(join(stateDir, "cancel.log"), "cancel:claude-session");
+      // Windows has no graceful signal; the relay stops the tree with taskkill instead.
+      if (process.platform !== "win32") await waitForLog(join(stateDir, "cancel.log"), "root-sigterm");
       const lease = await new SessionStore(stateDir).acquire(cwd);
       await lease.markReaped("no-worker-created");
       await lease.release();
@@ -299,7 +314,7 @@ describe("MCP server", () => {
       });
 
       await store.writeNew("confirmed-session", cwd);
-      vi.stubEnv("FAKE_ACP_MODE", "resume-fail");
+      vi.stubEnv("FAKE_DSH_TRANSCRIPT", "bad-model");
       await expect(call(32, "confirmed-session")).resolves.toMatchObject({
         provider: "dsh",
         sessionId: "confirmed-session",
@@ -385,13 +400,13 @@ describe("MCP server", () => {
     await server.close();
   });
 
-  it.runIf(process.platform === "win32")("returns a structured cleanup failure and retains the original partial result", async () => {
-    vi.stubEnv("FAKE_ACP_MODE", "exit");
+  it.runIf(process.platform === "win32")("counts a headless root exit as cleanup on Windows and reports the missing end event", async () => {
+    vi.stubEnv("FAKE_GROK_NO_EVENTS", "1");
     const cwd = await mkdtemp(join(tmpdir(), "relay-server-cwd-"));
     dirs.push(cwd);
     const { server, clientTransport, request } = await harness({
       command: process.execPath,
-      commandArgs: [grokFixture],
+      commandArgs: [grokHeadlessFixture],
     });
     const response = await request(6, "tools/call", {
       name: "grok_delegate",
@@ -404,7 +419,7 @@ describe("MCP server", () => {
         stopReason: null,
         text: "",
         truncated: false,
-        error: { code: "PROCESS_CLEANUP_FAILED" },
+        error: { code: "ACP_FAILURE" },
       },
     });
     await clientTransport.close();
@@ -442,7 +457,7 @@ describe("MCP server", () => {
       progressIntervalMs: 1,
     });
     const log = join(stateDir, "dsh-mcp.log");
-    vi.stubEnv("FAKE_ACP_LOG", log);
+    vi.stubEnv("FAKE_DSH_LOG", log);
     const success = await request(10, "tools/call", {
       name: "dsh_delegate",
       arguments: { task: "hello", cwd, model: "dsh/gpt", reasoningEffort: "" },
@@ -453,15 +468,24 @@ describe("MCP server", () => {
         structuredContent?: { provider?: string; text?: string; sessionId?: string };
       };
     };
+    const successTranscript = JSON.parse(await readFile(join(
+      import.meta.dirname, "fixtures/transcripts/dsh-0.2.2-rc.1/credential-restore-run.json",
+    ), "utf8")) as { lines: Array<{ json: { type?: string; text?: string } }> };
+    const successText = successTranscript.lines.findLast((line) => line.json.type === "final")?.json.text;
     expect(success.result?.isError).not.toBe(true);
     expect(success.result?.structuredContent).toMatchObject({
       provider: "dsh",
-      text: "fresh answer",
+      text: successText,
       sessionId: "fake-session-1",
     });
-    const configEvents = (await readFile(log, "utf8")).split(/\r?\n/);
-    expect(configEvents).toContain("set-config:model:dsh/gpt");
-    expect(configEvents).toContain("set-config:reasoning_effort:");
+    const logEvents = (await readFile(log, "utf8")).trim().split("\n").map((line) =>
+      JSON.parse(line) as Record<string, unknown>);
+    const spawns = logEvents.filter((event) => event.event === "spawn");
+    expect(spawns).toHaveLength(2);
+    const modelPatch = (spawns[1]!.patches as Array<{ contents: string }>)[1]!;
+    expect(JSON.parse(modelPatch.contents)[0].config).toEqual({
+      provider: "deepseek-official", model: "dsh/gpt",
+    });
     const progress = notifications.filter((message) =>
       "method" in message && message.method === "notifications/progress",
     );
@@ -479,7 +503,7 @@ describe("MCP server", () => {
     expect(resumed.result?.structuredContent?.sessionId).toBe("fake-session-1");
     expect(await readFile(log, "utf8")).toContain("resume:fake-session-1");
 
-    vi.stubEnv("FAKE_ACP_MODE", "partial-fail");
+    vi.stubEnv("FAKE_DSH_TRANSCRIPT", "bad-model");
     vi.stubEnv("FAKE_SESSION_ID", "partial-session");
     const partial = await request(12, "tools/call", {
       name: "dsh_delegate",
@@ -489,23 +513,22 @@ describe("MCP server", () => {
     expect(partial.result?.structuredContent).toMatchObject({
       provider: "dsh",
       sessionId: "partial-session",
-      text: "partial text",
-      toolCalls: expect.arrayContaining([expect.objectContaining({ toolCallId: "t1" })]),
-      usage: { used: 42, size: 128, cost: { amount: 3.5, currency: "USD" } },
-      error: { code: "ACP_FAILURE" },
+      text: "",
+      error: { code: "ACP_FAILURE", message: expect.stringContaining("INVALID_REQUEST") },
     });
 
-    vi.stubEnv("FAKE_ACP_MODE", "hang");
+    vi.stubEnv("FAKE_DSH_TRANSCRIPT", "sigterm-tool");
     vi.stubEnv("FAKE_SESSION_ID", "cancel-session");
     const hangLog = join(stateDir, "dsh-cancel.log");
-    vi.stubEnv("FAKE_ACP_LOG", hangLog);
+    vi.stubEnv("FAKE_DSH_LOG", hangLog);
     const cancelled = request(13, "tools/call", {
       name: "dsh_delegate",
       arguments: { task: "hang", cwd },
     }) as Promise<{ result?: { isError?: boolean; structuredContent?: { error?: { code?: string }; sessionId?: string; provider?: string } } }>;
     await waitForLog(hangLog, "prompt:cancel-session");
     await notify("notifications/cancelled", { requestId: 13, reason: "test cancel" });
-    await waitForLog(hangLog, "cancel:cancel-session");
+    // Windows has no graceful signal; the relay stops the tree with taskkill instead.
+    if (process.platform !== "win32") await waitForLog(hangLog, "cancel:cancel-session");
     const cancelledResult = await Promise.race([
       cancelled,
       new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 1_000)),
@@ -535,7 +558,7 @@ describe("MCP server", () => {
       totalTimeoutMs: 1_500,
       cancelGraceMs: 100,
     });
-    vi.stubEnv("FAKE_ACP_MODE", "hang");
+    vi.stubEnv("FAKE_DSH_TRANSCRIPT", "sigterm-tool");
     vi.stubEnv("FAKE_SESSION_ID", "cancel-session");
     const hung = await request(12, "tools/call", {
       name: "dsh_delegate",

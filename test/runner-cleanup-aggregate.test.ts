@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RelayFailure } from "../src/types.js";
-import { cleanupAllChildren, CursorRunner, DshRunner, GrokRunner, OpenCodeRunner } from "../src/runner.js";
+import { cleanupAllChildren, CursorRunner, DshRunner, OpenCodeRunner } from "../src/runner.js";
 import { SessionStore } from "../src/store.js";
-import { baseConfig, cleanupDirs, clearDelegatedEnv, tempDir } from "./helpers.js";
+import { TestAcpRunner, baseConfig, cleanupDirs, clearDelegatedEnv, tempDir } from "./helpers.js";
 
 const dirs: string[] = [];
 const releaseGates: Array<() => void> = [];
@@ -38,7 +38,7 @@ describe("process-wide cleanup aggregation", () => {
         return lease;
       }
     }
-    const task = new GrokRunner(baseConfig(stateDir), new BlockingStore(stateDir)).delegate({ task: "blocked", cwd });
+    const task = new TestAcpRunner(baseConfig(stateDir), new BlockingStore(stateDir)).delegate({ task: "blocked", cwd });
     const rejected = expect(task).rejects.toMatchObject({ code: "CANCELLED" });
     await started.promise;
 
@@ -71,7 +71,7 @@ describe("process-wide cleanup aggregation", () => {
     const stores = Array.from({ length: count }, (_, index) => new FailingReleaseStore(stateDir, `aggregate-${index}`));
     const cwds = await Promise.all(Array.from({ length: count }, (_, index) => tempDir(dirs, `relay-cleanup-${index}-`)));
     const tasks = cwds.map((cwd, index) => {
-      const Runner = [GrokRunner, CursorRunner, OpenCodeRunner, DshRunner][index % 4]!;
+      const Runner = [TestAcpRunner, CursorRunner, OpenCodeRunner, DshRunner][index % 4]!;
       const task = new Runner(baseConfig(stateDir), stores[index]!).delegate({ task: `blocked-${index}`, cwd });
       void task.catch(() => undefined);
       return task;
@@ -132,7 +132,7 @@ describe("process-wide cleanup aggregation", () => {
         return lease;
       }
     }
-    const tasks = cwds.map((cwd, index) => new GrokRunner(
+    const tasks = cwds.map((cwd, index) => new TestAcpRunner(
       baseConfig(stateDir),
       new BarrierStore(stateDir, index === 0 ? "ownership" : "io"),
     ).delegate({ task: "blocked", cwd }));

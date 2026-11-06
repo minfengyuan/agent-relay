@@ -18,8 +18,11 @@ export async function prepareNativeConfig(
       ...prepared,
       dispose: () => rm(configDirectory, { recursive: true, force: true }),
     };
-  } catch {
-    if (directory) await rm(directory, { recursive: true, force: true });
+  } catch (error) {
+    if (directory && !(error instanceof RelayFailure && error.code === "PROCESS_CLEANUP_FAILED")) {
+      await rm(directory, { recursive: true, force: true });
+    }
+    if (error instanceof RelayFailure) throw error;
     throw new RelayFailure("CONFIG_UNSUPPORTED", `Cannot prepare ${provider} native permission configuration`);
   }
 }

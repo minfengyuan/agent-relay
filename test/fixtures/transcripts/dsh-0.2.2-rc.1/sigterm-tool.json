@@ -1,0 +1,76 @@
+{
+  "scenario": "S2-6/7 SIGTERM during foreground shell tool with nohup background child",
+  "command": "dsh",
+  "args": [
+    "--profile",
+    "headless",
+    "--patch",
+    "<SPIKE>/dsh-policy-full.yml",
+    "--json",
+    "--permission-mode",
+    "workspace-write",
+    "--approval-policy",
+    "never",
+    "-"
+  ],
+  "stdin": "Run this exact shell command in the foreground and wait for it: `nohup sleep 301 >/dev/null 2>&1 & sleep 120; echo done`. Then reply done.",
+  "signalSentMs": 25019,
+  "exitMs": 25102,
+  "exitCode": 0,
+  "exitSignal": null,
+  "stderr": "[llm-deepseek-api-key] model listing from https://api.deepseek.com/models loaded 2 model(s), skipped 0 row(s)\ndsh: session \"session-8b22115e-e333-4588-9f74-fc42b8dde323\": flush on a closed handle\n",
+  "lines": [
+    {
+      "t": 1464,
+      "json": {
+        "type": "session",
+        "sessionId": "session-8b22115e-e333-4588-9f74-fc42b8dde323",
+        "cwd": "<SPIKE>/ws8"
+      }
+    },
+    {
+      "t": 1464,
+      "json": {
+        "type": "status",
+        "phase": "turn_start",
+        "turn": 1
+      }
+    },
+    {
+      "t": 1526,
+      "json": {
+        "type": "status",
+        "phase": "step_start",
+        "turn": 1,
+        "step": 1
+      }
+    },
+    {
+      "t": 5066,
+      "json": {
+        "type": "thinking",
+        "text": "The user is asking me to execute a command that includes `sleep 120` — this will wait in the foreground. I need to run it in the foreground and wait, then reply \"done\". But there's a catch: the tool has a timeout. Let me think about the semantics.\n\nThe instruction says \"Run this exact shell command in the foreground and wait for it\". The command is:\n\n`nohup sleep 301 >/dev/null 2>&1 & sleep 120; echo done`\n\nThis runs a background sleep 301, then sleeps 120 seconds foreground, then echoes done.\n\nThe concern: the harness timeout. If I set timeoutMs to e.g. 121000, this could exceed the configured time cap. The tool description says \"The executor applies its configured default and cap; on expiry the command moves to the background as a job instead of being killed.\"\n\nSo I should set a generous timeout (e.g. 180000 ms) to allow the 120-second sleep to complete. If the cap moves to background, I'd get a job id — but then I could collect it, which technically is still \"waiting\". But logically the user asked to wait in foreground and then reply done. The \"exact command\" is what matters and its output.\n\nThere's a subtle point: the user's phrasing is possibly a test of whether I'll be tricked into returning early or something. But nothing adversarial — just run it.\n\nI'll run with timeoutMs 180000. The command itself is safe — it starts a sleep 301 orphan, and sleeps 120 seconds. That's fine.\n\nNote: after sleep 120, it echoes \"done\". So output \"done\".\n\nLet me just run it. Should I use nohup? The command includes nohup as given — exact command. Just run as-is.\n\nOne consideration: if the harness timeout caps at, say, 120s or 60s, the command moves to background as a job and I'd need to collect it with job_output wait. That's acceptable — I'll still wait for it and reply done.\n\nLet me run with a high timeout."
+      }
+    },
+    {
+      "t": 5069,
+      "json": {
+        "type": "tool_call",
+        "callId": "call_00_nvolkzUbiPwbpTECs0oj2232",
+        "tool": "bash",
+        "input": {
+          "description": "Run requested sleep command in foreground",
+          "command": "nohup sleep 301 >/dev/null 2>&1 & sleep 120; echo done",
+          "timeoutMs": 180000
+        }
+      }
+    },
+    {
+      "t": 25049,
+      "json": {
+        "type": "error",
+        "message": "session \"session-8b22115e-e333-4588-9f74-fc42b8dde323\": flush on a closed handle"
+      }
+    }
+  ]
+}

@@ -1,0 +1,313 @@
+{
+  "scenario": "SIGTERM to the root at 15 s while a foreground sleep 120 tool runs",
+  "command": "grok",
+  "args": [
+    "--no-auto-update",
+    "--sandbox",
+    "workspace",
+    "--disable-web-search",
+    "--deny",
+    "WebFetch",
+    "--deny",
+    "WebSearch",
+    "--always-approve",
+    "--disallowed-tools",
+    "ask_user_question",
+    "--no-wait-for-background",
+    "--output-format",
+    "streaming-json",
+    "--cwd",
+    "<SPIKE>/ws3",
+    "-s",
+    "fd9a162d-ddaf-4e99-ac46-235a30cfbe7b",
+    "--prompt-file",
+    "<SPIKE>/p-long.txt"
+  ],
+  "stdin": null,
+  "signalSentMs": 15020,
+  "exitMs": 17498,
+  "exitCode": 143,
+  "exitSignal": null,
+  "stderr": "",
+  "lines": [
+    {
+      "t": 275,
+      "json": {
+        "type": "available_commands",
+        "tools": [],
+        "commands": []
+      }
+    },
+    {
+      "t": 295,
+      "json": {
+        "type": "available_commands",
+        "tools": [],
+        "commands": []
+      }
+    },
+    {
+      "t": 6245,
+      "json": {
+        "type": "thought",
+        "data": "Running `sleep 120 &&"
+      }
+    },
+    {
+      "t": 6245,
+      "json": {
+        "type": "thought",
+        "data": " echo done` in the foreground."
+      }
+    },
+    {
+      "t": 6245,
+      "json": {
+        "type": "thought",
+        "data": " Waiting for completion"
+      }
+    },
+    {
+      "t": 6322,
+      "json": {
+        "type": "thought",
+        "data": " before replying."
+      }
+    },
+    {
+      "t": 6497,
+      "json": {
+        "type": "text",
+        "data": "I'll"
+      }
+    },
+    {
+      "t": 6505,
+      "json": {
+        "type": "text",
+        "data": " run"
+      }
+    },
+    {
+      "t": 6508,
+      "json": {
+        "type": "text",
+        "data": " `"
+      }
+    },
+    {
+      "t": 6515,
+      "json": {
+        "type": "text",
+        "data": "sleep"
+      }
+    },
+    {
+      "t": 6523,
+      "json": {
+        "type": "text",
+        "data": " "
+      }
+    },
+    {
+      "t": 6527,
+      "json": {
+        "type": "text",
+        "data": "120"
+      }
+    },
+    {
+      "t": 6535,
+      "json": {
+        "type": "text",
+        "data": " &&"
+      }
+    },
+    {
+      "t": 6536,
+      "json": {
+        "type": "text",
+        "data": " echo"
+      }
+    },
+    {
+      "t": 6536,
+      "json": {
+        "type": "text",
+        "data": " done"
+      }
+    },
+    {
+      "t": 6536,
+      "json": {
+        "type": "text",
+        "data": "`"
+      }
+    },
+    {
+      "t": 6536,
+      "json": {
+        "type": "text",
+        "data": " in"
+      }
+    },
+    {
+      "t": 6536,
+      "json": {
+        "type": "text",
+        "data": " the"
+      }
+    },
+    {
+      "t": 6536,
+      "json": {
+        "type": "text",
+        "data": " foreground"
+      }
+    },
+    {
+      "t": 6536,
+      "json": {
+        "type": "text",
+        "data": " and"
+      }
+    },
+    {
+      "t": 6536,
+      "json": {
+        "type": "text",
+        "data": " wait"
+      }
+    },
+    {
+      "t": 6536,
+      "json": {
+        "type": "text",
+        "data": " until"
+      }
+    },
+    {
+      "t": 6536,
+      "json": {
+        "type": "text",
+        "data": " it"
+      }
+    },
+    {
+      "t": 6537,
+      "json": {
+        "type": "text",
+        "data": " finishes"
+      }
+    },
+    {
+      "t": 6537,
+      "json": {
+        "type": "text",
+        "data": "."
+      }
+    },
+    {
+      "t": 6659,
+      "json": {
+        "type": "available_commands",
+        "tools": [],
+        "commands": []
+      }
+    },
+    {
+      "t": 6661,
+      "json": {
+        "type": "usage",
+        "usage": {
+          "input_tokens": 15592,
+          "output_tokens": 248,
+          "cache_read_input_tokens": 6528,
+          "cache_creation_input_tokens": 0,
+          "reasoning_tokens": 192
+        },
+        "signature": "<redacted>"
+      }
+    },
+    {
+      "t": 6661,
+      "json": {
+        "type": "tool_call",
+        "toolCallId": "call-689cd9cf-7356-4c25-a648-9a47bf4e351f-0",
+        "title": "run_terminal_command",
+        "kind": "execute",
+        "status": "pending",
+        "toolName": "run_terminal_command",
+        "rawInput": {
+          "command": "sleep 120 && echo done",
+          "description": "Sleep 120 seconds then echo done",
+          "block_until_ms": 150000
+        },
+        "content": [],
+        "locations": []
+      }
+    },
+    {
+      "t": 6754,
+      "json": {
+        "type": "tool_call_update",
+        "toolCallId": "call-689cd9cf-7356-4c25-a648-9a47bf4e351f-0",
+        "status": null,
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Sleep 120 seconds then echo done"
+            }
+          }
+        ],
+        "rawOutput": null,
+        "locations": []
+      }
+    },
+    {
+      "t": 6767,
+      "json": {
+        "type": "tool_call_update",
+        "toolCallId": "call-689cd9cf-7356-4c25-a648-9a47bf4e351f-0",
+        "status": "in_progress",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": ""
+            }
+          }
+        ],
+        "rawOutput": {
+          "type": "Bash",
+          "output": [],
+          "output_for_prompt": "",
+          "exit_code": 0,
+          "command": "sleep 120 && echo done",
+          "truncated": false,
+          "signal": null,
+          "timed_out": false,
+          "description": null,
+          "current_dir": "<SPIKE>/ws3",
+          "output_file": "",
+          "total_bytes": 0
+        },
+        "locations": []
+      }
+    },
+    {
+      "t": 15022,
+      "json": {
+        "type": "end",
+        "stopReason": "cancelled",
+        "sessionId": "fd9a162d-ddaf-4e99-ac46-235a30cfbe7b",
+        "requestId": "<redacted>",
+        "cwd": "<SPIKE>/ws3",
+        "usage_is_incomplete": true
+      }
+    }
+  ]
+}

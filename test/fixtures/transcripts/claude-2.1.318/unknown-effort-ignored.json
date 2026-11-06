@@ -1,0 +1,387 @@
+{
+  "scenario": "--effort extreme-xyz is ignored with a stderr warning",
+  "command": "claude",
+  "args": [
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "acceptEdits",
+    "--permission-prompts",
+    "none",
+    "--effort",
+    "extreme-xyz",
+    "--session-id",
+    "73660e41-9eab-4593-8b8d-b83d3b4405d1"
+  ],
+  "stdin": "Read the file a.txt in the current directory and reply with its exact contents only.",
+  "signalSentMs": null,
+  "exitMs": 10141,
+  "exitCode": 0,
+  "exitSignal": null,
+  "stderr": "Warning: Unknown --effort value 'extreme-xyz' — ignoring it and using the default effort. Valid values: low, medium, high, xhigh, max.\n[claude-code:unrecognized_model] {\"model\":\"<model>\",\"query_source\":\"sdk\"}\n",
+  "lines": [
+    {
+      "t": 239,
+      "json": {
+        "type": "system",
+        "subtype": "hook_started",
+        "hook_event": "SessionStart",
+        "session_id": "73660e41-9eab-4593-8b8d-b83d3b4405d1"
+      }
+    },
+    {
+      "t": 400,
+      "json": {
+        "type": "system",
+        "subtype": "hook_response",
+        "hook_event": "SessionStart",
+        "session_id": "73660e41-9eab-4593-8b8d-b83d3b4405d1"
+      }
+    },
+    {
+      "t": 2655,
+      "json": {
+        "type": "system",
+        "subtype": "init",
+        "cwd": "<SPIKE>/ws4",
+        "session_id": "73660e41-9eab-4593-8b8d-b83d3b4405d1",
+        "tools": [],
+        "mcp_servers": [],
+        "model": "<model>",
+        "permissionMode": "acceptEdits",
+        "slash_commands": [],
+        "terminal_slash_commands": [
+          "doctor",
+          "color",
+          "focus",
+          "reload-plugins"
+        ],
+        "apiKeySource": "<redacted>",
+        "claude_code_version": "2.1.318",
+        "output_style": "<redacted>",
+        "agents": [],
+        "skills": [],
+        "plugins": [],
+        "capabilities": [
+          "interrupt_receipt_v1",
+          "interrupt_cancel_queued_v1",
+          "interrupt_send_now_v1",
+          "interrupt_requeue_taken_v1",
+          "msg_lifecycle_v1",
+          "request_marker_lists_v1",
+          "ask_user_question_unanswered_v1",
+          "lifecycle_wakeup_source_v1",
+          "sdk_mcp_tools_list_changed",
+          "sdk_mcp_manifests",
+          "mcp_read_resource_v1",
+          "mcp_tool_ui_meta_v1",
+          "ui_surface_v1",
+          "mcp_call_result_not_for_model_v1"
+        ],
+        "analytics_disabled": false,
+        "product_feedback_disabled": false,
+        "uuid": "<redacted>",
+        "memory_paths": "<redacted>",
+        "original_cwd": "<SPIKE>/ws4",
+        "additional_directories": [],
+        "messaging_socket_path": "/tmp/cc-socks/51412.sock",
+        "fast_mode_state": "<redacted>",
+        "fast_mode_disabled_reason": "sdk_opt_in_required",
+        "per_turn_effort_active": false,
+        "ultrathink_available": false,
+        "ultrathink_typed_raises": false,
+        "view_mode": "default"
+      }
+    },
+    {
+      "t": 3482,
+      "json": {
+        "type": "assistant",
+        "message": {
+          "id": "c154c8a2-0beb-4170-9e1f-9628a219a71d",
+          "type": "message",
+          "role": "assistant",
+          "model": "<model>",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "",
+              "signature": "<redacted>"
+            }
+          ],
+          "stop_reason": null,
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 19642,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 0,
+            "service_tier": "standard"
+          },
+          "context_management": null
+        },
+        "parent_tool_use_id": null,
+        "session_id": "73660e41-9eab-4593-8b8d-b83d3b4405d1",
+        "uuid": "<redacted>",
+        "timestamp": "2026-11-06T04:25:53.185Z",
+        "thinking_duration_ms": 1,
+        "thinking_display": "updates"
+      }
+    },
+    {
+      "t": 3699,
+      "json": {
+        "type": "assistant",
+        "message": {
+          "id": "c154c8a2-0beb-4170-9e1f-9628a219a71d",
+          "type": "message",
+          "role": "assistant",
+          "model": "<model>",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "call_00_ET_XcJqqqfeqPBqRvAkZWR97630",
+              "name": "Read",
+              "input": {
+                "file_path": "<SPIKE>/ws4/a.txt"
+              }
+            }
+          ],
+          "stop_reason": null,
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 19642,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 0,
+            "service_tier": "standard"
+          },
+          "context_management": null
+        },
+        "parent_tool_use_id": null,
+        "session_id": "73660e41-9eab-4593-8b8d-b83d3b4405d1",
+        "uuid": "<redacted>",
+        "timestamp": "2026-11-06T04:25:53.403Z",
+        "wire_tool_inputs": {
+          "call_00_ET_XcJqqqfeqPBqRvAkZWR97630": {
+            "file_path": "<SPIKE>/ws4/a.txt"
+          }
+        }
+      }
+    },
+    {
+      "t": 3719,
+      "json": {
+        "type": "rate_limit_event",
+        "rate_limit_info": "<redacted>",
+        "uuid": "<redacted>",
+        "session_id": "73660e41-9eab-4593-8b8d-b83d3b4405d1"
+      }
+    },
+    {
+      "t": 3821,
+      "json": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "tool_use_id": "call_00_ET_XcJqqqfeqPBqRvAkZWR97630",
+              "type": "tool_result",
+              "content": "1\thello-spike\n2\t"
+            }
+          ]
+        },
+        "parent_tool_use_id": null,
+        "session_id": "73660e41-9eab-4593-8b8d-b83d3b4405d1",
+        "uuid": "<redacted>",
+        "timestamp": "2026-11-06T04:25:53.529Z",
+        "tool_use_result": {
+          "type": "text",
+          "file": {
+            "filePath": "<SPIKE>/ws4/a.txt",
+            "content": "hello-spike\n",
+            "numLines": 2,
+            "startLine": 1,
+            "totalLines": 2
+          }
+        },
+        "tool_result_meta": [
+          {
+            "id": "call_00_ET_XcJqqqfeqPBqRvAkZWR97630",
+            "permission_decision": {
+              "decision": "accept",
+              "source": "config",
+              "reason_type": "mode"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "t": 7015,
+      "json": {
+        "type": "system",
+        "subtype": "commands_changed",
+        "session_id": "73660e41-9eab-4593-8b8d-b83d3b4405d1"
+      }
+    },
+    {
+      "t": 9499,
+      "json": {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "text": "hello-spike",
+              "type": "text"
+            }
+          ],
+          "id": "msg_011Cgm3HKNynD9FbBytAiuHw",
+          "model": "<model>",
+          "role": "assistant",
+          "stop_reason": null,
+          "stop_sequence": null,
+          "type": "message",
+          "usage": {
+            "input_tokens": 2,
+            "output_tokens": 1,
+            "cache_read_input_tokens": 10822,
+            "cache_creation_input_tokens": 20389,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 20389
+            }
+          },
+          "context_management": null
+        },
+        "parent_tool_use_id": null,
+        "session_id": "73660e41-9eab-4593-8b8d-b83d3b4405d1",
+        "uuid": "<redacted>",
+        "timestamp": "2026-11-06T04:25:59.204Z"
+      }
+    },
+    {
+      "t": 9535,
+      "json": {
+        "type": "rate_limit_event",
+        "rate_limit_info": "<redacted>",
+        "uuid": "<redacted>",
+        "session_id": "73660e41-9eab-4593-8b8d-b83d3b4405d1"
+      }
+    },
+    {
+      "t": 9546,
+      "json": {
+        "duration_api_ms": 6759,
+        "stop_reason": "end_turn",
+        "session_id": "73660e41-9eab-4593-8b8d-b83d3b4405d1",
+        "total_cost_usd": 0.309896,
+        "usage": {
+          "input_tokens": 19644,
+          "cache_creation_input_tokens": 20389,
+          "cache_read_input_tokens": 10822,
+          "output_tokens": 95,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 20389,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        },
+        "modelUsage": {
+          "<model>": {
+            "inputTokens": 19644,
+            "outputTokens": 95,
+            "cacheReadInputTokens": 10822,
+            "cacheCreationInputTokens": 20389,
+            "webSearchRequests": 0,
+            "costUSD": 0.309896,
+            "contextWindow": 1000000,
+            "maxOutputTokens": 32000,
+            "thinkingTokens": 0,
+            "cacheCreationEphemeral5mInputTokens": 0,
+            "cacheCreationEphemeral1hInputTokens": 20389,
+            "canonicalModel": "<model>",
+            "provider": "firstParty",
+            "costBasis": "unknown"
+          }
+        },
+        "permission_denials": [],
+        "terminal_reason": "completed",
+        "fast_mode_state": "<redacted>",
+        "fast_mode_disabled_reason": "sdk_opt_in_required",
+        "subagent_stats": {
+          "spawned": 0,
+          "requested": {
+            "background": 0,
+            "foreground": 0,
+            "unset": 0
+          },
+          "started_in_background": 0,
+          "max_depth": 0,
+          "spawned_by_subagents": 0,
+          "completed": 0,
+          "failed": 0,
+          "killed": {
+            "parent": 0,
+            "user": 0,
+            "system": 0
+          },
+          "refused": {
+            "depth_limit": 0,
+            "concurrency_limit": 0,
+            "budget": 0
+          },
+          "by_type": {}
+        },
+        "safety_stops": 0,
+        "is_error": false,
+        "num_turns": 2,
+        "subtype": "success",
+        "api_error_status": null,
+        "result": "hello-spike",
+        "ttft_ms": 1046,
+        "type": "result",
+        "duration_ms": 7114,
+        "uuid": "<redacted>",
+        "ttft_stream_ms": 1045,
+        "time_to_request_ms": 241,
+        "first_content_frame_ms": 1045,
+        "queued_turn_count": 0,
+        "result_index": 0,
+        "model_usage_since_last_result": {
+          "<model>": {
+            "inputTokens": 19644,
+            "outputTokens": 95,
+            "cacheReadInputTokens": 10822,
+            "cacheCreationInputTokens": 20389,
+            "webSearchRequests": 0,
+            "costUSD": 0.309896,
+            "contextWindow": 1000000,
+            "maxOutputTokens": 32000,
+            "thinkingTokens": 0,
+            "cacheCreationEphemeral5mInputTokens": 0,
+            "cacheCreationEphemeral1hInputTokens": 20389,
+            "canonicalModel": "<model>",
+            "provider": "firstParty",
+            "costBasis": "unknown"
+          }
+        },
+        "credential_expires_at": "2026-12-02T18:47:10.722Z"
+      }
+    }
+  ]
+}

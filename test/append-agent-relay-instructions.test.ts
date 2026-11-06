@@ -85,11 +85,22 @@ describe("append-agent-relay-instructions", () => {
 
     expect(first).toContain("## External coding agents");
     expect(first).toContain("`grok_delegate`");
+    expect(first).toContain("Grok implementation tasks through headless streaming JSON");
+    expect(first).toContain("Pass the returned UUID `sessionId` with the same `cwd` to resume");
+    expect(first).toContain("Unexpected permission diagnostics return UNEXPECTED_PERMISSION");
+    expect(first).toContain("Cancellation waits for Grok's graceful shutdown");
     expect(first).toContain("`cursor_delegate`");
     expect(first).toContain("`opencode_delegate`");
     expect(first).toContain("`dsh_delegate`");
+    expect(first).toContain("DSH uses `workspace-write` and `--approval-policy never` on new and resumed turns");
+    expect(first).toContain("DSH recognized a sandbox or auto-review denial after the turn");
     expect(first).toContain("`codex_delegate`");
     expect(first).toContain("`claude_delegate`");
+    expect(first).toContain("Claude Code CLI headless mode");
+    expect(first).toContain("Optional `model` and `effort` are CLI arguments");
+    expect(first).toContain("Pass the returned UUID `sessionId` with the same `cwd` to resume");
+    expect(first).toContain("automatically denies approval-requiring tools");
+    expect(first).toContain("returns PERMISSION_REQUIRED after it finishes");
     expect(first).toContain("INTERACTION_REQUIRED");
     expect(first).toContain("PERMISSION_REQUIRED");
     expect(first).toContain("allow_once");

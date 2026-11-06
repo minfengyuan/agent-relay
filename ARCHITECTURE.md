@@ -4,7 +4,7 @@ This document explains the durable component boundaries and runtime invariants o
 
 ## System context
 
-The relay sits between **MCP clients** and locally installed **coding-agent CLIs** using ACP or the native Codex app-server protocol:
+The relay sits between **MCP clients** and locally installed **coding-agent CLIs** using ACP, the native Codex app-server protocol, or a provider headless JSON transport:
 
 ```text
 MCP client
@@ -15,16 +15,32 @@ src/cli.ts → src/cli-runtime.ts
 src/server.ts
   │ validated delegate request
   ▼
-AcpRunner / CodexRunner ── SessionStore
-  │                    │
-  │ ACP or native      ├─ session metadata
-  │ stdin/stdout       └─ per-cwd locks
-  ▼
-Provider CLI
-(Grok / Cursor / OpenCode / DSH / Codex / Claude Code)
+  ├─ AcpRunner ────────────────────── Cursor / OpenCode (ACP)
+  │    └─ inline lifecycle + lease
+  │
+  ├─ HeadlessRunner ─┐
+  │                 ├─ WorkerHost ── owned CLI process tree
+  └─ CodexRunner ────┘                 ├─ Grok / DSH / Claude (NDJSON)
+                                      └─ Codex (app-server JSONL RPC)
+
+All runners ── lifecycle.ts (admission / shutdown)
+            └─ SessionStore (session metadata / shared per-cwd locks)
 ```
 
 The relay is an orchestration boundary, not a second autonomous planner. The calling client chooses what to delegate and reviews/integrates the result; the relay executes one non-interactive provider turn and returns a resumable session ID plus bounded output.
+
+## Transport selection
+
+Choose the transport from verified native capabilities before choosing a runner.
+
+| Provider | Transport / runner | Reason |
+| --- | --- | --- |
+| Grok | streaming JSON / `HeadlessRunner` | Native unattended turns own their daemon, expose terminal events, and resume ACP-created UUIDs. |
+| DSH | headless JSON / `HeadlessRunner` | Each invocation enforces workspace-write and never approvals, including resume; no ACP close requirement. |
+| Claude Code | stream-json / `HeadlessRunner` | Native CLI credentials and result/permission-denial events remove the separate ACP bridge. |
+| Codex | native app-server / `CodexRunner` | Persistent threads, bidirectional requests, approvals, and turn interrupts need a native RPC driver. |
+| Cursor | ACP / `AcpRunner` | Print-stream equivalents for interactions/todos/subagents/images are unverified. Print approval/WebFetch behavior is unverified, and it cannot validate ask mode through advertised session modes. A separate spike is required before changing transport. |
+| OpenCode | ACP / `AcpRunner` | Existing capability negotiation, session options, permission refusal, and summaries remain on the supported ACP interface. |
 
 ## Layer boundaries
 
@@ -84,11 +100,35 @@ After `initialize`/`initialized`, Codex checks `account/read` without initiating
 
 Every turn explicitly applies workspace-write sandboxing with sandbox network access disabled, default temporary-directory access, on-request approvals routed to the user, and no automatic approval. Approval requests are declined and fail with `PERMISSION_REQUIRED`; questions/elicitation fail with `INTERACTION_REQUIRED`. Local Codex authentication and MCP configuration still apply. Text and tool summaries are bounded, agent-message completion is deduplicated against deltas, and native token usage retains `total`, `last`, and `modelContextWindow` rather than ACP usage semantics. Only `turn/completed` with status `completed` succeeds.
 
-Both runners register with `src/runner/lifecycle.ts` before acquiring a lease. This module owns the synchronous admission gate, active-task registry, shutdown promise, and cleanup diagnostic aggregation. Existing runner exports remain compatible. Codex cancellation first attempts `turn/interrupt` within bounded grace, then uses the existing process-tree controller and lease protocol; unconfirmed cleanup retains the lock and takes precedence over task errors.
+Codex and `HeadlessRunner` run on the protocol-independent `src/runner/worker-host.ts`, which owns admission checks, total timeout, caller cancellation, lease acquisition, spawning, process-tree binding, bounded stderr, cleanup ordering, and cleanup diagnostics. The protocol driver supplies `drive(ctx)` and an optional `gracefulCancel(ctx)`; Codex uses the latter to attempt `turn/interrupt` within bounded grace, and the headless driver uses it for a provider-selected signal such as SIGTERM. The host also exposes a bounded helper-subprocess entry for provider preflight commands. A helper runs under the same workspace lease; after confirmed cleanup it moves the held lease from `reaped` back to `spawning` without retiring it, then binds the main worker. A helper shares the task's admission, cancellation, and total timeout, and does not register a separate active task. Unconfirmed helper cleanup fails closed and retains the lease and private preparation state.
+
+Both runners register with `src/runner/lifecycle.ts` before acquiring a lease. This module owns the synchronous admission gate, active-task registry, shutdown promise, and cleanup diagnostic aggregation. Existing runner exports remain compatible. Unconfirmed worker cleanup retains the lock and takes precedence over lease and task errors.
+
+### Headless NDJSON execution
+
+`src/runner/headless-runner.ts` adds a provider-neutral driver on `WorkerHost`. Its `HeadlessAdapter` contract in `types.ts` owns command/preparation, stdin policy, event decoding, terminal/exit interpretation, summaries, and graceful-stop signal/grace. Preparation uses a private native-config task directory, retained when process cleanup cannot be confirmed. DSH, Grok, and Claude use this layer; DSH also uses the host helper entry for `--dump-config` model-route preflight.
+
+The driver lifecycle is:
+
+1. The host checks admission/nesting, registers cancellation and total timeout, acquires the workspace lease, and reads any recorded session.
+2. The adapter selects a preset ID when needed and prepares private files, optional helpers, arguments, environment, and stdin (`ignore`, `close`, or `{ write }`).
+3. The host marks spawning, spawns without a shell in the resolved cwd, marks the child `AGENT_RELAY_DELEGATED=1`, binds its process tree, and collects bounded stderr.
+4. The driver parses frames, validates session IDs, persists a new confirmed ID, collects bounded text/summaries, and sends rate-limited progress.
+5. After stream close and process exit, the driver applies stderr/permission failures and calls `complete(state, exit)`. A terminal success event and a valid exit are both required.
+6. On cancellation, the adapter's graceful root signal precedes host tree termination. The host marks terminating, confirms tree cleanup, marks reaped, then releases the lease and disposes private files. Unconfirmed cleanup marks orphaned and retains the lease/files. Error precedence is cleanup, lease, then task failure.
+
+`ndjson-lines.ts` reads stdout with an 8 MiB per-frame limit and rejects oversized or malformed JSON as `PROTOCOL_MISMATCH`. The runner ignores unknown event types, bounds text and summaries, persists new IDs on a session event (or the first event for a preset ID), and rejects inconsistent IDs. Only relay-recorded IDs appear in partial results or resume commands. Permission denials are reported after the worker finishes, preserving later output. Completion requires a successful terminal event plus adapter validation of the process exit; successful resumes touch their record. Cancellation signals the root and waits within the adapter's grace for a terminal event before the host terminates the process tree. DSH maps its headless transcript into this contract: `final.text` is authoritative, only exit `0` plus `final.reason.kind: "completed"` succeeds, credential, session, and cwd errors are normalized, usage is omitted, and recognized sandbox or auto-review denials become post-turn `PERMISSION_REQUIRED` failures. Claude persists at `system/init`, treats a result with `is_error: false` as successful, and converts result `permission_denials` into a post-turn `PERMISSION_REQUIRED` failure.
+
+Grok creates a private daemon for each headless run, including when user configuration enables leader mode. Its adapter uses streaming JSON, a private `0600` prompt file, ignored stdin, and a preset UUID with `-s`; it persists the UUID on the first event and validates `end.sessionId`. Resume uses `-r` with a relay-recorded UUID and `--cwd`, preserving the root `sessions/` namespace for ACP-created UUIDs without title matching. Text chunks accumulate; tools provide progress only, and usage/thought/available-command events add no result fields. Success requires `end`, a non-cancelled stop reason, no error event, and exit `0`. Authentication and missing-session messages are normalized by the adapter.
+
+Claude runs the native CLI with `-p --output-format stream-json --verbose`, `acceptEdits`, and `--permission-prompts none`; the task is written to stdin. New sessions receive a preset UUID through `--session-id`, and records are persisted when `system/init` arrives. Resume passes only a relay-recorded UUID through `--resume` in the `sessions/claude` namespace. Effort is validated locally before spawn, while model names are passed through because the gateway decides whether they are accepted. Result text is authoritative, tool use/results feed bounded summaries, and CLI token counters do not map to the relay usage shape, so usage is omitted. A SIGTERM exit `143` without a result is never success.
+
+The optional `stderrFailure(tail)` hook classifies bounded stderr diagnostics without provider branches in the runner. Grok uses it for `permission required:` → `UNEXPECTED_PERMISSION`, even on exit `0`; Claude uses it defensively for `Unknown --effort value` → `INVALID_CONFIG`. The runner retains a detected failure as stderr advances and waits for stream close before completion. The optional `gracefulStop.waitForExit` makes Grok and Claude wait for actual exit after root SIGTERM, rather than stopping at an early terminal event or a missing result. Grok's tool shells can use separate process groups: only Grok's own graceful shutdown reaps those groups. Force-killing the original process group cannot guarantee cleanup of escaped tools; DSH detached tool groups have the same limitation.
 
 ### `src/runner/*`: shared execution primitives
 
-- `types.ts` defines `ProviderAdapter`, summarizer, permission runtime, and session configuration extension points.
+- `types.ts` defines `ProviderAdapter`, `HeadlessAdapter`, summarizer, permission runtime, and session configuration extension points.
+- `worker-host.ts` owns the shared non-ACP worker lifecycle used by native Codex and headless providers.
 - `limits.ts` bounds output and supplies timeout helpers.
 - `summaries.ts` converts high-volume provider updates into bounded structured summaries. Standard usage/tool-call summaries require an explicit provider; `OpenCodeSummaries(limit)` remains a thin `"opencode"` wrapper.
 - `helpers.ts` centralizes ACP capability/auth/cancellation helpers.
@@ -144,15 +184,15 @@ MCP request
   │
   ├─ optional session-record lookup
   │
-  ├─ spawn provider ACP CLI
+  ├─ spawn provider CLI (ACP, headless, or native)
   │
-  ├─ ACP initialize/auth
+  ├─ ACP initialize/auth, or headless session event
   │
   ├─ new | load | resume session
   │
-  ├─ provider-specific session configuration
+  ├─ provider-specific session configuration/preflight
   │
-  ├─ session/prompt
+  ├─ session/prompt or headless task
   │    ├─ text chunks -> bounded text
   │    ├─ tool/usage/provider updates -> bounded summarizer
   │    └─ progress -> MCP notifications/progress (rate limited)
@@ -174,30 +214,40 @@ Important consequences:
 - Results and partial errors expose a `sessionId` only after its relay record has been read or written successfully, so any returned ID is eligible for relay resume from its bound `cwd`.
 - A session is tied to the resolved working directory to prevent accidental continuation in another checkout/worktree.
 - Provider options that must remain stable across a session belong in persisted metadata when necessary. Cursor currently persists model/mode semantics; Grok, OpenCode, DSH, and Claude currently do not persist extra adapter metadata.
-- Provider capability negotiation decides whether an existing session can be resumed or loaded.
-- DSH and Claude persist a new relay record before session configuration so validation, setting, timeout, or cancellation failures can return a resumable ID. Other providers keep configuration-before-persistence behavior unless their adapter opts in.
+- ACP capability negotiation decides whether an existing session can be resumed or loaded; headless adapters pass only relay-recorded IDs to native resume flags.
+- DSH persists its new relay record when the headless session event arrives, before prompting. Claude persists its preset UUID when `system/init` arrives, before the model call. Both retain their existing session namespaces for ACP-era compatibility.
 
 ## Provider behavior matrix
 
-| Concern | Grok | Cursor | OpenCode | DSH |
-| --- | --- | --- | --- | --- |
-| CLI default | `grok` | explicit `AGENT_RELAY_CURSOR_COMMAND` required | `opencode` | `dsh --profile acp` |
-| Authentication | `xai.api_key` when available, otherwise `cached_token` | `cursor_login` | `opencode-login` when advertised; no auth request when none advertised | no authenticate request |
-| Existing session | common load behavior | common load behavior with persisted mode/model checks | prefers ACP resume, falls back to load; `resume: false` forces load | resume only when advertised; never load or fall back to new |
-| Successful completion | process cleanup | process cleanup | process cleanup | requires advertised `session/close`; waits for close before reporting success |
-| Interactive questions | not supported | question requests are skipped; plan approval rejected | V1 question permission denied in child env; V2 ACP cancels questions without client form support | noninteractive prompt prefix only |
-| Permission request | unexpected -> fail/cancel | reject once when possible and fail with structured summary | reject once when possible, otherwise cancel; fail with PERMISSION_REQUIRED; never auto-allow | reject once when offered; never allow; fail with PERMISSION_REQUIRED |
-| Native file policy | workspace sandbox, including Grok state/temp writes | enabled workspace sandbox with explicit cwd | V1 external-directory permissions denied; no OS sandbox or V2 permission translation | workspace-write defaults for fresh sessions; saved modes survive resume |
-| Native web policy | web search/fetch disabled; child networking allowed | WebFetch denied, user-config-only network rules; custom allowlists apply | V1 webfetch/websearch denied; V2 configuration still applies; shell networking remains possible | web tools disabled; file sandbox does not govern networking |
-| Provider summaries | plain text result | tool calls, todos, subagents, interactions, images | usage and tool-call summaries | usage and tool-call summaries |
+| Concern | Grok | Cursor | OpenCode | DSH | Claude |
+| --- | --- | --- | --- | --- | --- |
+| CLI default | `grok --output-format streaming-json` | explicit `AGENT_RELAY_CURSOR_COMMAND` required | `opencode` | `dsh --profile headless` | `claude -p --output-format stream-json` |
+| Authentication | existing CLI credentials; no interactive login | `cursor_login` | `opencode-login` when advertised; no auth request when none advertised | restored bundled credential services, then launch env and `.env` fallback | existing Claude Code CLI login; auth failures map to `AUTH_UNAVAILABLE` |
+| Existing session | recorded UUID via `-r` and `--cwd`; root namespace retained | common load behavior with persisted mode/model checks | prefers ACP resume, falls back to load; `resume: false` forces load | relay-confirmed ID passed as `--session-id`; never load or create a replacement | recorded UUID via `--resume`; `sessions/claude` retained; never create a replacement |
+| Successful completion | non-cancelled `end`, no error event, exit `0`, confirmed cleanup | process cleanup | process cleanup | exit `0` and `final.reason.kind: "completed"` | exit `0` and terminal `result.is_error: false` |
+| Interactive questions | not supported | question requests are skipped; plan approval rejected | V1 question permission denied in child env; V2 ACP cancels questions without client form support | noninteractive; no question channel | noninteractive; approval-requiring tools are denied automatically |
+| Permission request | stderr `permission required:` → UNEXPECTED_PERMISSION | reject once when possible and fail with structured summary | reject once when possible, otherwise cancel; fail with PERMISSION_REQUIRED; never auto-allow | never approvals; recognized denial codes fail after the turn with PERMISSION_REQUIRED | `--permission-prompts none`; `permission_denials` fail after the turn with PERMISSION_REQUIRED |
+| Native file policy | workspace sandbox, including Grok state/temp writes | enabled workspace sandbox with explicit cwd | V1 external-directory permissions denied; no OS sandbox or V2 permission translation | workspace-write patch on every new and resumed turn | `acceptEdits` plus native allow rules; no OS isolation |
+| Native web policy | web search/fetch disabled; child networking allowed | WebFetch denied, user-config-only network rules; custom allowlists apply | V1 webfetch/websearch denied; V2 configuration still applies; shell networking remains possible | web tools disabled; shell networking remains possible | native rules apply; shell networking and external MCP services remain available |
+| Provider summaries | plain text result | tool calls, todos, subagents, interactions, images | usage and tool-call summaries | tool-call summaries; usage omitted | tool-call summaries; usage omitted |
 
 This table describes current implementation, not a requirement that every future provider behave identically.
 
-Claude Code uses `claude-agent-acp` as a separate executable, keeping its SDK dependencies outside the relay. It negotiates ACP v1, uses existing credentials without `authenticate`, and advertises no terminal/file services or elicitation UI. A structured ACP `authRequired` error maps to `AUTH_UNAVAILABLE` through the adapter's optional `mapError` hook; unrelated failures keep the generic error mapping.
+## Headless compatibility baselines and spike evidence
 
-Claude has an isolated session namespace and shared workspace locks. It prefers resume, falls back to load only when resume is not advertised, and never creates a replacement after restore failure. Model and effort use refreshed advertised config options; every new/restored session explicitly sets and verifies mode `acceptEdits` before prompting. Extra permission requests select `reject_once` or cancel and fail with `PERMISSION_REQUIRED`. Native allow rules, hooks, shell networking and external MCP services remain active; this is not OS isolation.
+The pinned transcript baselines are **Grok 1.0.77**, **DSH 0.2.2-rc.1**, and **Claude Code 2.1.318**. Sanitized raw events, stderr, timing, and exit status live in [`test/fixtures/transcripts/`](test/fixtures/transcripts/). These are tested observations at those versions, not guarantees about future CLI releases.
 
-Like DSH, Claude requires `session/close` and uses the shared finalization/cleanup sequence below. Windows npm/pnpm launchers share a conservative parser with DSH, parameterized by package name, bin name and entry path. DSH's resolver export remains compatible; arbitrary batch scripts never execute.
+| Spike | Observed conclusion and evidence | Limit / assumption |
+| --- | --- | --- |
+| S1 Grok | `new-session-success.json`: preset UUID matches `end.sessionId`; `resume-acp-session.json`: ACP context resumes through `-r`; `resume-unknown.json` and `not-signed-in.json`: structured error messages. `sigterm-during-tool.json`: early cancelled end, then exit 143. | Leader-enabled headless runs owned a private daemon in the process-tree probe (not captured in NDJSON). Tool shells can escape the original group; graceful shutdown is necessary. |
+| S2 DSH | `credential-restore-run.json`: restored credential services work; shell networking and `/tmp` writes remain possible. `sandbox-deny.json`: `FS_SANDBOX_DENIED` can precede completed final. `shell-sandbox-deny.json`: a shell-internal denial is a completed `tool_result` with no code, marked only by `[sandbox: file access denied under …]` text. `bad-model.json`: generic `INVALID_REQUEST`. `sigterm-tool.json`: exit 0 and error only, no final. | Both bare ACP UUIDs and headless IDs resume in the same literal cwd (`resume-acp-session.json`, `resume-headless-session.json`); those turns then fail for missing credentials. Process-tree probes found separate tool groups. |
+| S3 Claude | `new-session-success.json`: init confirms the preset UUID. `permission-denied-continues.json`: denied tools do not stop later edits. `resume-unknown.json`: unknown ID is an error result. `unknown-model-accepted.json` and `unknown-effort-ignored.json`: gateway-dependent model acceptance and silently ignored effort. Both `sigterm-*.json` traces exit 143 without result. | ACP-created session compatibility is assumed, not measured: keep `sessions/claude`, return `UNKNOWN_SESSION` if unavailable, and never create a replacement. Unauthenticated/keychain behavior was not probed against a real account. |
+
+Opt-in headless smoke tests check exact CLI versions and compare observed event types with the union in the corresponding baseline directory. Required session/text/terminal types must appear for the scenario; optional hook/tool/rate-limit types need not all appear on every run. New types fail the smoke check for review, while production still ignores unknown types. Hermetic tests exercise these checks without installed CLIs.
+
+Claude runs through the native Claude Code CLI headless stream rather than a separate ACP bridge. It preserves the user's CLI login, hooks, skills, plugins, native allow rules, and MCP configuration. The `sessions/claude` namespace and workspace locks remain unchanged. Effort is validated locally before spawn because the CLI silently ignores unknown values; model names are passed through because acceptance depends on the configured gateway. Result `permission_denials` are reported after the turn, so the model may continue after a denial.
+
+DSH, Grok, and Claude no longer use ACP close; their headless process trees are the cleanup boundary. They use SIGTERM as the graceful signal, and the adapter supplies the grace duration. Windows has no graceful signal, so cancellation skips it there and `taskkill /T /F` runs while the root is alive. Headless workers and preparation helpers declare `exitsOnCompletion`: on Windows their root's own exit counts as confirmed cleanup, because descendants of an exited root cannot be found. ACP and Codex workers keep the strict rule below. Windows npm/pnpm launchers still share a conservative parser, parameterized by package name, bin name and entry path. Claude's resolver targets the official `@anthropic-ai/claude-code` `bin.claude` entry. DSH's resolver export remains compatible; arbitrary batch scripts never execute.
 
 ## Non-interactive permission model
 
@@ -205,7 +255,7 @@ Delegated execution must not stall waiting for a human UI. Each provider adapter
 
 The generic runner treats permission state as part of task failure handling so that cancellation, partial output, and cleanup use the same path as other execution failures. Do not add an unbounded user-question wait loop to the runner.
 
-Cursor prepares a private CLI config snapshot; DSH writes a bundled native patch into a private task directory and appends `--patch`. The generic runner owns disposal after confirmed process cleanup and reports disposal failures through cleanup diagnostics. Preparation failure never falls back to unrestricted execution. User configuration, provider session logs, and the session-record format are unchanged. Each ACP adapter emits a bounded static stderr policy warning; DSH resume warnings state that ACP cannot verify saved sandbox mode. These settings express native policy, not uniform OS/network isolation; external MCP services remain outside the boundary.
+Cursor prepares a private CLI config snapshot; DSH writes a bundled permissions patch and optional model patch into a private task directory and passes them immediately after `--profile headless`. The generic runner owns disposal after confirmed process cleanup and reports disposal failures through cleanup diagnostics. Preparation failure never falls back to unrestricted execution. User configuration, provider session logs, and the session-record format are unchanged. Each ACP adapter emits a bounded static stderr policy warning. These settings express native policy, not uniform OS/network isolation; external MCP services remain outside the boundary. DSH shell networking remains available, and recognised permission signals are limited to the `FS_SANDBOX_DENIED` and `AUTO_REVIEW_DENIED` codes plus the shell sandbox result marker.
 
 Native Codex also disables built-in web search in thread start/resume configuration. Its per-turn sandbox network denial remains separate from model/API traffic.
 
@@ -229,11 +279,11 @@ There are three cancellation sources:
 - Total task timeout.
 - Relay shutdown.
 
-The runner tracks a session as active only after `session/new`, `session/resume`, or `session/load` returns a valid result. Cancellation, timeout, and permission failure then run ACP `session/cancel`, best-effort adapter finalization, and process-tree termination in that order. Providers without a finalization hook retain the legacy behavior of waiting for process exit within the remaining cancellation grace period; providers with a finalizer proceed directly to finalization so DSH can close while the ACP connection is still usable. Configuration, prompting, persistence, and other failures skip cancel but still attempt finalization before termination. No finalization is attempted when session activation failed or timed out. Cancel notification, finalization, and termination are independently single-flight so caller cancellation, task failure, and relay shutdown cannot duplicate protocol requests or signals.
+The ACP runner tracks a session as active only after `session/new`, `session/resume`, or `session/load` returns a valid result. Cancellation, timeout, and permission failure then run ACP `session/cancel`, the optional adapter finalization hook, and process-tree termination in that order. No current ACP adapter defines that finalization hook. Configuration, prompting, persistence, and other failures skip cancel but still attempt finalization before termination. No finalization is attempted when session activation failed or timed out. Cancel notification, finalization, and termination are independently single-flight so caller cancellation, task failure, and relay shutdown cannot duplicate protocol requests or signals.
 
-DSH validates the advertised `session/close` capability immediately after initialize, before creating or resuming a session. On a successful prompt, the adapter waits for `session/close` before the result can succeed. The close response is the provider-level confirmation that session updates, descendants, and persistence have been finalized. The runner then persists the resumed session record (`store.touch`) before returning from the ACP `connectWith` callback. Process-tree cleanup still runs afterward and remains authoritative for worker cleanup. On Windows, the runner starts that cleanup after touch and before the callback returns, without awaiting it, so the ACP connection still owns the worker root and descendant-cleanup proof is retained. On POSIX, the success path does not start termination inside the callback; the existing outer `finally` terminates the process group after `connectWith` settles. On an abnormal path, close failure is bounded secondary diagnostic data and never replaces the original task error; unconfirmed process cleanup and lease errors retain their higher precedence.
+Headless DSH, Grok, and Claude use SIGTERM as their graceful signal; their adapter-selected grace precedes process-tree termination. DSH waits for a terminal event within `cancelGraceMs`. Grok waits at least 12 seconds for its early cancelled `end` and actual daemon exit. Claude emits no `result` line after SIGTERM, so its adapter waits up to at least 5 seconds for the actual process to exit; exit `143` without a result is never success. Caller cancellation and timeout retain their trigger reason, while process-tree confirmation remains authoritative for releasing the lease.
 
-On POSIX systems the provider is spawned in its own process group. Before sending signals, cleanup retries an unknown initial group probe within `killConfirmMs`: on macOS an exiting worker can briefly produce `EPERM` before its group disappears. If the probe remains unknown, cleanup fails closed without sending signals. Once the group is known to be alive, cleanup sends group-level `SIGTERM`, escalates to `SIGKILL`, and confirms both group disappearance and direct-child exit; processes that escape the original group are outside this guarantee. After those signals, confirmation retries transient unknown process-group probes (`EPERM` and other non-`ESRCH` errors) only inside the existing TERM/KILL confirmation deadlines, then fails closed if the last probe is still unknown. `EPERM` and direct-child exit alone never count as group disappearance. Windows invokes the absolute `%SystemRoot%\System32\taskkill.exe` path with `/T /F`, without a shell, and confirms both a successful helper exit and direct-child exit. This is confirmation of the `taskkill` operation, not Job Object or crash-proof containment. A Windows root that exits before tree termination is conservatively unconfirmed because the relay can no longer establish descendant cleanup.
+On POSIX systems the provider is spawned in its own process group. Before sending signals, cleanup retries an unknown initial group probe within `killConfirmMs`: on macOS an exiting worker can briefly produce `EPERM` before its group disappears. If the probe remains unknown, cleanup fails closed without sending signals. Once the group is known to be alive, cleanup sends group-level `SIGTERM`, escalates to `SIGKILL`, and confirms both group disappearance and direct-child exit; processes that escape the original group are outside this guarantee. After those signals, confirmation retries transient unknown process-group probes (`EPERM` and other non-`ESRCH` errors) only inside the existing TERM/KILL confirmation deadlines, then fails closed if the last probe is still unknown. `EPERM` and direct-child exit alone never count as group disappearance. Windows invokes the absolute `%SystemRoot%\System32\taskkill.exe` path with `/T /F`, without a shell, and confirms both a successful helper exit and direct-child exit. This is confirmation of the `taskkill` operation, not Job Object or crash-proof containment. A Windows root that exits before tree termination is conservatively unconfirmed because the relay can no longer establish descendant cleanup, unless the worker declares `exitsOnCompletion` (headless CLIs and preparation helpers).
 
 If process-tree cleanup is unconfirmed, the runner returns `PROCESS_CLEANUP_FAILED`, preserves partial task output, and attempts to mark the lease `orphaned` without releasing it. Metadata failures never skip actual process cleanup. Once cleanup is confirmed, the runner must persist `reaped` before it can retire the lease. Error precedence is cleanup failure, then lease ownership/I/O failure, then the original task failure.
 

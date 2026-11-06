@@ -5,10 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { dshSpawnSpec } from "../src/adapters/dsh.js";
+import { dshAdapter, dshSpawnSpec } from "../src/adapters/dsh.js";
 import { loadConfig } from "../src/config.js";
-import { cleanupAllChildren, DshRunner } from "../src/runner.js";
-import { SessionStore } from "../src/store.js";
+import { cleanupAllChildren } from "../src/runner.js";
+import { HeadlessRunner } from "../src/runner/headless-runner.js";
+import { SessionStore, resolveCwd } from "../src/store.js";
+import { assertHeadlessVersion, observeHeadlessEvents } from "./headless-baseline.js";
 
 const execFileAsync = promisify(execFile);
 const enabled = process.env.RUN_DSH_REAL_TESTS === "1" || process.env.npm_lifecycle_event === "test:real:dsh";
@@ -33,27 +35,27 @@ async function assertNoActiveLease(state: string, cwd: string): Promise<void> {
   await lease.release();
 }
 
-describeReal("real DSH ACP smoke", () => {
+describeReal("real DSH headless smoke", () => {
   it("creates, resumes across processes, and edits a disposable workspace", async () => {
     if (process.env.AGENT_RELAY_DELEGATED === "1") {
       throw new Error("Real DSH smoke is unavailable inside a delegated worker (NESTED_DELEGATION); run it from the parent environment");
     }
     const loaded = loadConfig();
-    const version = dshSpawnSpec({ ...loaded, dshCommandArgs: ["--version"] });
-    await execFileAsync(version.command, version.args, { timeout: 15_000 });
-    const help = dshSpawnSpec({ ...loaded, dshCommandArgs: ["--profile", "acp", "--help"] });
+    await assertHeadlessVersion("dsh", dshSpawnSpec({ ...loaded, dshCommandArgs: [] }));
+    const help = dshSpawnSpec({ ...loaded, dshCommandArgs: ["--profile", "headless", "--help"] });
     await execFileAsync(help.command, help.args, { timeout: 15_000 });
 
-    const root = await mkdtemp(join(tmpdir(), "dsh-real-"));
+    const root = await resolveCwd(await mkdtemp(join(tmpdir(), "dsh-real-")));
     roots.push(root);
     const state = join(root, "state");
     const workspace = join(root, "workspace");
     await mkdir(workspace);
     await writeFile(join(workspace, "README.md"), "workspace\n");
     const config = { ...loaded, stateDir: state, totalTimeoutMs: TASK_TIMEOUT_MS };
+    const observed = observeHeadlessEvents("dsh", dshAdapter(config));
     const nonce = randomUUID();
     try {
-      const created = await new DshRunner(config, new SessionStore(state, "dsh")).delegate({
+      const created = await new HeadlessRunner(config, new SessionStore(state, "dsh"), observed.adapter).delegate({
         task: `Remember ${nonce} and reply with exactly STORED. Do not write the nonce to a file.`,
         cwd: workspace,
       });
@@ -63,24 +65,29 @@ describeReal("real DSH ACP smoke", () => {
       expect(await readFile(join(workspace, "README.md"), "utf8")).toBe("workspace\n");
       const names = await readdir(workspace);
       expect(names.filter((name) => !name.startsWith("."))).toEqual(["README.md"]);
+      observed.assertEvents(["session", "text", "final"]);
       await assertNoActiveLease(state, workspace);
 
       await cleanupAllChildren();
-      const resumed = await new DshRunner(config, new SessionStore(state, "dsh")).delegate({
+      const resumedEvents = observeHeadlessEvents("dsh", dshAdapter(config));
+      const resumed = await new HeadlessRunner(config, new SessionStore(state, "dsh"), resumedEvents.adapter).delegate({
         task: "Reply with the exact nonce I asked you to remember. Do not read files to recover it.",
         cwd: workspace,
         sessionId: created.sessionId as string,
       });
       expect(resumed.sessionId).toBe(created.sessionId);
       expect(resumed.text).toContain(nonce);
+      resumedEvents.assertEvents(["session", "text", "final"]);
       await assertNoActiveLease(state, workspace);
 
-      const edit = await new DshRunner(config, new SessionStore(state, "dsh")).delegate({
+      const editEvents = observeHeadlessEvents("dsh", dshAdapter(config));
+      const edit = await new HeadlessRunner(config, new SessionStore(state, "dsh"), editEvents.adapter).delegate({
         task: "Create smoke.txt containing exactly dsh-smoke followed by a newline. Do not ask questions.",
         cwd: workspace,
       });
       expect(edit.error).toBeUndefined();
       expect(await readFile(join(workspace, "smoke.txt"), "utf8")).toBe("dsh-smoke\n");
+      editEvents.assertEvents(["session", "tool_call", "tool_result", "final"]);
       await assertNoActiveLease(state, workspace);
     } finally {
       await cleanupAllChildren();
@@ -97,20 +104,24 @@ describeReal("real DSH ACP smoke", () => {
       context.skip("DSH_TEST_MODEL / DSH_TEST_REASONING_EFFORT not set; config resume unverified");
       return;
     }
-    const root = await mkdtemp(join(tmpdir(), "dsh-real-config-"));
+    const root = await resolveCwd(await mkdtemp(join(tmpdir(), "dsh-real-config-")));
     roots.push(root);
     const state = join(root, "state");
     const workspace = join(root, "workspace");
     await mkdir(workspace);
     const config = { ...loadConfig(), stateDir: state, totalTimeoutMs: TASK_TIMEOUT_MS };
+    await assertHeadlessVersion("dsh", dshSpawnSpec({ ...config, dshCommandArgs: [] }));
+    const observed = observeHeadlessEvents("dsh", dshAdapter(config));
     try {
-      const created = await new DshRunner(config, new SessionStore(state, "dsh")).delegate({
+      const created = await new HeadlessRunner(config, new SessionStore(state, "dsh"), observed.adapter).delegate({
         task: "Reply with exactly READY.",
         cwd: workspace,
       });
       await assertNoActiveLease(state, workspace);
+      observed.assertEvents(["session", "text", "final"]);
       await cleanupAllChildren();
-      const resumed = await new DshRunner(config, new SessionStore(state, "dsh")).delegate({
+      const resumedEvents = observeHeadlessEvents("dsh", dshAdapter(config));
+      const resumed = await new HeadlessRunner(config, new SessionStore(state, "dsh"), resumedEvents.adapter).delegate({
         task: "Reply with exactly CONFIGURED.",
         cwd: workspace,
         sessionId: created.sessionId as string,
@@ -118,6 +129,7 @@ describeReal("real DSH ACP smoke", () => {
         ...(reasoningEffort ? { reasoningEffort } : {}),
       });
       expect(resumed.text).toContain("CONFIGURED");
+      resumedEvents.assertEvents(["session", "text", "final"]);
       await assertNoActiveLease(state, workspace);
     } finally {
       await cleanupAllChildren();

@@ -1,0 +1,33 @@
+{
+  "scenario": "Resume with an unknown session id",
+  "command": "dsh",
+  "args": [
+    "--profile",
+    "headless",
+    "--patch",
+    "<SPIKE>/dsh-policy-new.yml",
+    "--json",
+    "--permission-mode",
+    "workspace-write",
+    "--approval-policy",
+    "never",
+    "--session-id",
+    "session-00000000-0000-4000-8000-000000000000",
+    "-"
+  ],
+  "stdin": "Read the file a.txt in the current directory and reply with its exact contents only.",
+  "signalSentMs": null,
+  "exitMs": 864,
+  "exitCode": 1,
+  "exitSignal": null,
+  "stderr": "dsh: session \"session-00000000-0000-4000-8000-000000000000\" does not exist; omit --session-id to start a new Session\n",
+  "lines": [
+    {
+      "t": 846,
+      "json": {
+        "type": "error",
+        "message": "session \"session-00000000-0000-4000-8000-000000000000\" does not exist; omit --session-id to start a new Session"
+      }
+    }
+  ]
+}

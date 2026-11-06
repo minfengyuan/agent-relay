@@ -572,7 +572,7 @@ async function settleWithin(promise: Promise<unknown>, timeoutMs: number): Promi
 function asFinalizationFailure(error: unknown, displayName: string): RelayFailure {
   if (error instanceof RelayFailure) return error;
   return new RelayFailure(
-    "SESSION_CLOSE_FAILED",
+    "ACP_FAILURE",
     `${displayName} session finalization failed: ${error instanceof Error ? error.message : String(error)}`,
   );
 }

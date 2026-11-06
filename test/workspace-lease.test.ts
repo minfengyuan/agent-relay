@@ -42,6 +42,36 @@ describe("workspace leases", () => {
     await lease.release();
   });
 
+  it("reuses one held lease across a confirmed helper and worker without exposing the cwd", async () => {
+    const state = await tempDir(dirs);
+    const cwd = await tempDir(dirs);
+    const first = new SessionStore(state);
+    const second = new SessionStore(state);
+    const lease = await first.acquire(cwd);
+    await lease.markSpawning();
+    await lease.bindWorker(worker);
+    await lease.markTerminating();
+    await lease.markReaped("tree-exit-confirmed");
+    await expect(second.acquire(cwd)).rejects.toMatchObject({ code: "WORKSPACE_BUSY" });
+    await lease.markSpawning();
+    await expect(second.acquire(cwd)).rejects.toMatchObject({ code: "WORKSPACE_BUSY" });
+    await lease.bindWorker(worker);
+    await lease.markTerminating();
+    await lease.markReaped("tree-exit-confirmed");
+    await lease.release();
+    const next = await second.acquire(cwd);
+    await next.markReaped("no-worker-created");
+    await next.release();
+  });
+
+  it("refuses to restart a lease whose process-tree cleanup is not confirmed", async () => {
+    const state = await tempDir(dirs);
+    const cwd = await tempDir(dirs);
+    const lease = await new SessionStore(state).acquire(cwd);
+    await lease.markOrphaned();
+    await expect(lease.markSpawning()).rejects.toMatchObject({ code: "LOCK_IO" });
+  });
+
   it("fails closed on malformed owner records", async () => {
     const state = await tempDir(dirs);
     const cwd = await tempDir(dirs);

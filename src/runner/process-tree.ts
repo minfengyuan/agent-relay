@@ -35,6 +35,11 @@ export function probePosixProcessGroup(pgid: number): ProcessProbe {
 type ControllerOptions = {
   termGraceMs: number;
   killConfirmMs: number;
+  /**
+   * Windows only: count the root's own exit as cleanup. Use it only for workers that exit by
+   * themselves when their work ends; descendants that outlive such a root are not tracked.
+   */
+  acceptRootExit?: boolean;
 };
 
 export function processTreeSpawnOptions(): Pick<SpawnOptionsWithoutStdio, "detached"> {
@@ -56,7 +61,7 @@ export function createProcessTreeController(
     reference,
     terminate(): Promise<TerminationReport> {
       termination ??= process.platform === "win32"
-        ? terminateWindows(child, reference(), options.killConfirmMs)
+        ? terminateWindows(child, reference(), options.killConfirmMs, options.acceptRootExit === true)
         : terminatePosix(child, reference(), options.termGraceMs, options.killConfirmMs);
       return termination;
     },
@@ -167,11 +172,13 @@ async function terminateWindows(
   child: ChildProcessWithoutNullStreams,
   reference: ProcessTreeReference | undefined,
   killConfirmMs: number,
+  acceptRootExit: boolean,
 ): Promise<TerminationReport> {
   if (!reference || reference.kind !== "windows-process-tree") {
     return { forced: true, confirmed: false, reason: "The worker process has no process-tree reference" };
   }
   if (exited(child)) {
+    if (acceptRootExit) return { forced: false, confirmed: true };
     return {
       forced: true,
       confirmed: false,

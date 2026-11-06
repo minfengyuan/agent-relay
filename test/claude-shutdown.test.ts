@@ -13,14 +13,14 @@ it("shuts down Claude and native workers together and closes admission", async (
   const config = baseConfig(state);
   const log = join(state, "claude.log");
   const nativeLog = join(state, "native.log");
-  vi.stubEnv("FAKE_ACP_LOG", log);
-  vi.stubEnv("FAKE_ACP_MODE", "hang");
+  vi.stubEnv("FAKE_CLAUDE_LOG", log);
+  vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "sigterm-before-tool");
   vi.stubEnv("CODEX_FIXTURE_LOG", nativeLog);
   const runner = new ClaudeRunner(config, new SessionStore(state, "claude"));
   const claude = runner.delegate({ task: "hang", cwd }).catch((error: unknown) => error);
   const native = new CodexRunner(config, new SessionStore(state, "codex")).delegate({ task: "hang", cwd: other }).catch((error: unknown) => error);
   try {
-    await Promise.all([waitForLog(log, "prompt:claude-session"), waitForLog(nativeLog, '"prompt":"hang"')]);
+    await Promise.all([waitForLog(log, "waiting"), waitForLog(nativeLog, '"prompt":"hang"')]);
     const shutdown = beginRunnerShutdown();
     expect(beginRunnerShutdown()).toBe(shutdown);
     await expect(runner.delegate({ task: "late", cwd })).rejects.toMatchObject({ code: "CANCELLED" });

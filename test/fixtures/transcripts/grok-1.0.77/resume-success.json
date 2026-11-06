@@ -1,0 +1,145 @@
+{
+  "scenario": "Resume headless session with -r <uuid>",
+  "command": "grok",
+  "args": [
+    "--no-auto-update",
+    "--sandbox",
+    "workspace",
+    "--disable-web-search",
+    "--deny",
+    "WebFetch",
+    "--deny",
+    "WebSearch",
+    "--always-approve",
+    "--disallowed-tools",
+    "ask_user_question",
+    "--no-wait-for-background",
+    "--output-format",
+    "streaming-json",
+    "--cwd",
+    "<SPIKE>/ws3",
+    "-r",
+    "3106fde4-dde7-4e00-913d-1aa1c7cce960",
+    "--prompt-file",
+    "<SPIKE>/p-recall.txt"
+  ],
+  "stdin": null,
+  "signalSentMs": null,
+  "exitMs": 12281,
+  "exitCode": 0,
+  "exitSignal": null,
+  "stderr": "",
+  "lines": [
+    {
+      "t": 675,
+      "json": {
+        "type": "available_commands",
+        "tools": [],
+        "commands": []
+      }
+    },
+    {
+      "t": 681,
+      "json": {
+        "type": "available_commands",
+        "tools": [],
+        "commands": []
+      }
+    },
+    {
+      "t": 8071,
+      "json": {
+        "type": "thought",
+        "data": "I need to provide the"
+      }
+    },
+    {
+      "t": 8071,
+      "json": {
+        "type": "thought",
+        "data": " exact content reported"
+      }
+    },
+    {
+      "t": 8071,
+      "json": {
+        "type": "thought",
+        "data": " in the previous turn."
+      }
+    },
+    {
+      "t": 8084,
+      "json": {
+        "type": "text",
+        "data": "hello"
+      }
+    },
+    {
+      "t": 8085,
+      "json": {
+        "type": "text",
+        "data": "-"
+      }
+    },
+    {
+      "t": 8085,
+      "json": {
+        "type": "text",
+        "data": "spike"
+      }
+    },
+    {
+      "t": 8649,
+      "json": {
+        "type": "available_commands",
+        "tools": [],
+        "commands": []
+      }
+    },
+    {
+      "t": 8651,
+      "json": {
+        "type": "usage",
+        "usage": {
+          "input_tokens": 218,
+          "output_tokens": 111,
+          "cache_read_input_tokens": 23808,
+          "cache_creation_input_tokens": 0,
+          "reasoning_tokens": 108
+        },
+        "signature": "<redacted>"
+      }
+    },
+    {
+      "t": 9469,
+      "json": {
+        "type": "end",
+        "stopReason": "end_turn",
+        "sessionId": "3106fde4-dde7-4e00-913d-1aa1c7cce960",
+        "requestId": "<redacted>",
+        "cwd": "<SPIKE>/ws3",
+        "usage": {
+          "input_tokens": 218,
+          "cache_read_input_tokens": 23808,
+          "cache_creation_input_tokens": 0,
+          "output_tokens": 111,
+          "reasoning_tokens": 108,
+          "total_tokens": 24137
+        },
+        "num_turns": 1,
+        "total_cost_usd": 0.013006,
+        "total_cost_usd_ticks": 130060000,
+        "modelUsage": {
+          "grok-4.7-build": {
+            "inputTokens": 218,
+            "outputTokens": 111,
+            "cacheReadInputTokens": 23808,
+            "cacheCreationInputTokens": 0,
+            "modelCalls": 1,
+            "costUSD": 0.013006
+          }
+        }
+      }
+    }
+  ]
+}

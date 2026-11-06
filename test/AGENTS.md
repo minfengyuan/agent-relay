@@ -4,7 +4,7 @@ These instructions apply to `test/**`. Read the root [`AGENTS.md`](../AGENTS.md)
 
 ## Test strategy
 
-The default suite must be hermetic. Relay behavior is tested by spawning deterministic fake ACP agents and a fake Codex app-server from `test/fixtures/`, not by invoking a developer's installed CLI.
+The default suite must be hermetic. Relay behavior is tested by spawning deterministic fake ACP agents, fake headless CLI transcript replays, and a fake Codex app-server from `test/fixtures/`, not by invoking a developer's installed CLI.
 
 Real-agent smoke tests are separate and opt-in because they depend on local executables, authentication, provider versions, network/service availability, and provider-side behavior.
 
@@ -42,20 +42,26 @@ pnpm test:real:claude
 
 Run these only when the corresponding CLI is installed/authenticated and the change needs verification against a real implementation. A missing real-provider environment is not a reason to weaken or skip hermetic coverage.
 
+Headless smoke checks use `headless-baseline.ts`: Grok 1.0.77, DSH 0.2.2-rc.1, and Claude Code 2.1.318. They run the real adapter and `HeadlessRunner`, check `--version`, and observe decoded stdout events. Observed types must belong to the union of committed transcripts, and scenario-required types must appear; optional hook/tool events need not appear every time. Version/type drift fails the smoke check and requires transcript review, while production continues to ignore unknown types. Do not update baseline versions just to make a smoke test pass.
+
 ## Test ownership map
 
 Use the narrowest test file that owns the behavior:
 
 - `config.test.ts` — environment parsing and defaults.
+- `headless-baseline.test.ts` — hermetic version/event drift checks and provider decoder handling of unknown types.
+- `ndjson-lines.test.ts` and `headless-runner.test.ts` — shared frame validation, session consistency, cancellation order, error precedence, truncation, and grandchild cleanup. Do not duplicate these scenarios per provider unless its decoder or graceful-stop policy changes the behavior.
 - `store.test.ts` — session persistence, validation, and state I/O.
 - `workspace-lock.test.ts` — per-`cwd` serialization/lock behavior.
-- `runner.test.ts` — generic Grok/common ACP runner behavior.
+- `runner.test.ts` — generic ACP runner behavior through `TestAcpRunner`.
+- `grok-runner.test.ts` — Grok headless transcript replay, UUID sessions, stderr permissions, and graceful shutdown.
 - `cursor-runner.test.ts` — Cursor adapter behavior.
 - `opencode-runner.test.ts` — OpenCode adapter behavior.
 - `dsh-runner.test.ts` — DSH adapter behavior.
+- `dsh-windows-command.test.ts` — verified DSH npm/pnpm launchers without shell execution.
 - `codex-runner.test.ts` — native Codex protocol, session, permission, and lifecycle behavior.
 - `codex-shutdown.test.ts` — shared shutdown across Codex and ACP workers.
-- `claude-runner.test.ts` — Claude ACP permissions, configuration, session restore and cleanup.
+- `claude-runner.test.ts` — Claude headless transcript replay, UUID sessions, local effort validation, post-turn permissions, cancellation, and cleanup.
 - `claude-windows-command.test.ts` — verified Claude npm/pnpm launchers without shell execution.
 - `claude-shutdown.test.ts` — shared shutdown across Claude and native workers.
 - `claude-cleanup.test.ts` — unconfirmed Claude cleanup retains the orphaned workspace lease.
@@ -71,14 +77,14 @@ When a change crosses boundaries, add assertions at each affected public boundar
 `test/helpers.ts` is the preferred place for reusable test plumbing:
 
 - `tempDir()` returns a canonical temporary directory.
-- `baseConfig()` points provider commands at fake ACP fixtures and uses short test timeouts.
+- `baseConfig()` points provider commands at fake ACP/headless fixtures and uses short test timeouts.
 - `useRunnerCleanup()` resets stubbed environment variables, calls `cleanupAllChildren()`, and removes temporary directories after each test.
 
 For tests that spawn runners, prefer `useRunnerCleanup()` or equivalent explicit cleanup. A passing assertion with a leaked child process is still a failing test design.
 
 ## Fixture rules
 
-Fixtures model external ACP CLIs. Keep them deterministic and purpose-specific.
+Fixtures model external ACP or headless CLIs. Keep them deterministic and purpose-specific. Headless fakes replay committed provider transcripts rather than inventing event shapes.
 
 - Prefer extending an existing fake agent when the protocol behavior is shared.
 - Add a new fixture when a scenario requires materially different process/backpressure/lifecycle behavior.
@@ -115,7 +121,7 @@ Do not fix a flaky lifecycle test by adding a large unconditional sleep unless n
 
 ## Adding provider coverage
 
-For a new provider, create a dedicated `<provider>-runner.test.ts` when it has provider-specific semantics. The fake agent should cover the ACP features that distinguish the adapter: authentication, session resume/load, permission requests, config options, and extension notifications.
+For a new provider, create a dedicated `<provider>-runner.test.ts` when it has provider-specific semantics. Cover the transport features that distinguish the adapter, such as ACP authentication/session/capability flow or headless command, event, terminal, permission, and resume behavior.
 
 Also update `server.test.ts` for the MCP tool contract and add a real smoke test only if maintaining one is practical for that provider.
 
