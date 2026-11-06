@@ -1,0 +1,44 @@
+{
+  "scenario": "Empty isolated GROK_HOME and no XAI_API_KEY",
+  "command": "env",
+  "args": [
+    "-u",
+    "XAI_API_KEY",
+    "grok",
+    "--no-auto-update",
+    "--sandbox",
+    "workspace",
+    "--disable-web-search",
+    "--deny",
+    "WebFetch",
+    "--deny",
+    "WebSearch",
+    "--always-approve",
+    "--disallowed-tools",
+    "ask_user_question",
+    "--no-wait-for-background",
+    "--output-format",
+    "streaming-json",
+    "--cwd",
+    "<SPIKE>/ws3",
+    "-s",
+    "f11dd557-2295-4c68-8292-d25bf08db27a",
+    "--prompt-file",
+    "<SPIKE>/p-read.txt"
+  ],
+  "stdin": null,
+  "signalSentMs": null,
+  "exitMs": 442,
+  "exitCode": 1,
+  "exitSignal": null,
+  "stderr": "Error: Not signed in. To authenticate without a browser, run:\n  grok login --device-code\n\nAlternatively, set the XAI_API_KEY environment variable or run `grok login` on a machine with a browser.\n",
+  "lines": [
+    {
+      "t": 424,
+      "json": {
+        "type": "error",
+        "message": "Not signed in. To authenticate without a browser, run:\n  grok login --device-code\n\nAlternatively, set the XAI_API_KEY environment variable or run `grok login` on a machine with a browser."
+      }
+    }
+  ]
+}

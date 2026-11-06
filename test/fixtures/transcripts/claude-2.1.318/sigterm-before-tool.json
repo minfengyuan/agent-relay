@@ -1,0 +1,107 @@
+{
+  "scenario": "SIGTERM at 18 s before the first tool call; no result line",
+  "command": "claude",
+  "args": [
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "acceptEdits",
+    "--permission-prompts",
+    "none",
+    "--allowedTools",
+    "Bash(python3:*)",
+    "--session-id",
+    "f3308cd0-f201-418a-9862-0f8e62c22d6a"
+  ],
+  "stdin": "Run exactly this shell command in the foreground and wait for it: python3 -c \"import time; time.sleep(120); print(1)\"  Then reply done.",
+  "signalSentMs": 18019,
+  "exitMs": 18611,
+  "exitCode": 143,
+  "exitSignal": null,
+  "stderr": "[claude-code:unrecognized_model] {\"model\":\"<model>\",\"query_source\":\"sdk\"}\n",
+  "lines": [
+    {
+      "t": 235,
+      "json": {
+        "type": "system",
+        "subtype": "hook_started",
+        "hook_event": "SessionStart",
+        "session_id": "f3308cd0-f201-418a-9862-0f8e62c22d6a"
+      }
+    },
+    {
+      "t": 380,
+      "json": {
+        "type": "system",
+        "subtype": "hook_response",
+        "hook_event": "SessionStart",
+        "session_id": "f3308cd0-f201-418a-9862-0f8e62c22d6a"
+      }
+    },
+    {
+      "t": 2623,
+      "json": {
+        "type": "system",
+        "subtype": "init",
+        "cwd": "<SPIKE>/ws4",
+        "session_id": "f3308cd0-f201-418a-9862-0f8e62c22d6a",
+        "tools": [],
+        "mcp_servers": [],
+        "model": "<model>",
+        "permissionMode": "acceptEdits",
+        "slash_commands": [],
+        "terminal_slash_commands": [
+          "doctor",
+          "color",
+          "focus",
+          "reload-plugins"
+        ],
+        "apiKeySource": "<redacted>",
+        "claude_code_version": "2.1.318",
+        "output_style": "<redacted>",
+        "agents": [],
+        "skills": [],
+        "plugins": [],
+        "capabilities": [
+          "interrupt_receipt_v1",
+          "interrupt_cancel_queued_v1",
+          "interrupt_send_now_v1",
+          "interrupt_requeue_taken_v1",
+          "msg_lifecycle_v1",
+          "request_marker_lists_v1",
+          "ask_user_question_unanswered_v1",
+          "lifecycle_wakeup_source_v1",
+          "sdk_mcp_tools_list_changed",
+          "sdk_mcp_manifests",
+          "mcp_read_resource_v1",
+          "mcp_tool_ui_meta_v1",
+          "ui_surface_v1",
+          "mcp_call_result_not_for_model_v1"
+        ],
+        "analytics_disabled": false,
+        "product_feedback_disabled": false,
+        "uuid": "<redacted>",
+        "memory_paths": "<redacted>",
+        "original_cwd": "<SPIKE>/ws4",
+        "additional_directories": [],
+        "messaging_socket_path": "/tmp/cc-socks/52480.sock",
+        "fast_mode_state": "<redacted>",
+        "fast_mode_disabled_reason": "sdk_opt_in_required",
+        "per_turn_effort_active": false,
+        "ultrathink_available": false,
+        "ultrathink_typed_raises": false,
+        "view_mode": "default"
+      }
+    },
+    {
+      "t": 4152,
+      "json": {
+        "type": "system",
+        "subtype": "commands_changed",
+        "session_id": "f3308cd0-f201-418a-9862-0f8e62c22d6a"
+      }
+    }
+  ]
+}

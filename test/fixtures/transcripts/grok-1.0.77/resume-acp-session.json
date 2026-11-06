@@ -1,0 +1,152 @@
+{
+  "scenario": "Resume a session created through grok agent stdio (ACP) with -r",
+  "command": "grok",
+  "args": [
+    "--no-auto-update",
+    "--sandbox",
+    "workspace",
+    "--disable-web-search",
+    "--deny",
+    "WebFetch",
+    "--deny",
+    "WebSearch",
+    "--always-approve",
+    "--disallowed-tools",
+    "ask_user_question",
+    "--no-wait-for-background",
+    "--output-format",
+    "streaming-json",
+    "--cwd",
+    "<SPIKE>/ws3",
+    "-r",
+    "01a1af19-4eec-7b31-a3ed-e49b030ec0db",
+    "--prompt-file",
+    "<SPIKE>/p-recall2.txt"
+  ],
+  "stdin": null,
+  "signalSentMs": null,
+  "exitMs": 11368,
+  "exitCode": 0,
+  "exitSignal": null,
+  "stderr": "",
+  "lines": [
+    {
+      "t": 686,
+      "json": {
+        "type": "available_commands",
+        "tools": [],
+        "commands": []
+      }
+    },
+    {
+      "t": 694,
+      "json": {
+        "type": "available_commands",
+        "tools": [],
+        "commands": []
+      }
+    },
+    {
+      "t": 6230,
+      "json": {
+        "type": "text",
+        "data": "You"
+      }
+    },
+    {
+      "t": 6231,
+      "json": {
+        "type": "text",
+        "data": " asked"
+      }
+    },
+    {
+      "t": 6231,
+      "json": {
+        "type": "text",
+        "data": " me"
+      }
+    },
+    {
+      "t": 6231,
+      "json": {
+        "type": "text",
+        "data": " to"
+      }
+    },
+    {
+      "t": 6231,
+      "json": {
+        "type": "text",
+        "data": " say"
+      }
+    },
+    {
+      "t": 6231,
+      "json": {
+        "type": "text",
+        "data": " ok"
+      }
+    },
+    {
+      "t": 6231,
+      "json": {
+        "type": "text",
+        "data": "."
+      }
+    },
+    {
+      "t": 6275,
+      "json": {
+        "type": "available_commands",
+        "tools": [],
+        "commands": []
+      }
+    },
+    {
+      "t": 6277,
+      "json": {
+        "type": "usage",
+        "usage": {
+          "input_tokens": 20135,
+          "output_tokens": 54,
+          "cache_read_input_tokens": 2176,
+          "cache_creation_input_tokens": 0,
+          "reasoning_tokens": 47
+        },
+        "signature": "<redacted>"
+      }
+    },
+    {
+      "t": 7098,
+      "json": {
+        "type": "end",
+        "stopReason": "end_turn",
+        "sessionId": "01a1af19-4eec-7b31-a3ed-e49b030ec0db",
+        "requestId": "<redacted>",
+        "cwd": "<SPIKE>/ws3",
+        "usage": {
+          "input_tokens": 20135,
+          "cache_read_input_tokens": 2176,
+          "cache_creation_input_tokens": 0,
+          "output_tokens": 54,
+          "reasoning_tokens": 47,
+          "total_tokens": 22365
+        },
+        "num_turns": 1,
+        "total_cost_usd": 0.041682,
+        "total_cost_usd_ticks": 416820000,
+        "modelUsage": {
+          "grok-4.7-build": {
+            "inputTokens": 20135,
+            "outputTokens": 54,
+            "cacheReadInputTokens": 2176,
+            "cacheCreationInputTokens": 0,
+            "modelCalls": 1,
+            "costUSD": 0.041682
+          }
+        }
+      }
+    }
+  ]
+}

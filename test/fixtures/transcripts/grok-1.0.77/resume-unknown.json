@@ -1,0 +1,41 @@
+{
+  "scenario": "Resume with an unknown UUID; Grok tries a remote restore first",
+  "command": "grok",
+  "args": [
+    "--no-auto-update",
+    "--sandbox",
+    "workspace",
+    "--disable-web-search",
+    "--deny",
+    "WebFetch",
+    "--deny",
+    "WebSearch",
+    "--always-approve",
+    "--disallowed-tools",
+    "ask_user_question",
+    "--no-wait-for-background",
+    "--output-format",
+    "streaming-json",
+    "--cwd",
+    "<SPIKE>/ws3",
+    "-r",
+    "00000000-0000-4000-8000-000000000000",
+    "--prompt-file",
+    "<SPIKE>/p-recall.txt"
+  ],
+  "stdin": null,
+  "signalSentMs": null,
+  "exitMs": 3177,
+  "exitCode": 1,
+  "exitSignal": null,
+  "stderr": "Session \"00000000-0000-4000-8000-000000000000\" not found locally, restoring conversation from remote...\n  [0.000s] 🔎 Fetching session record — Loading restore metadata from the registry\nError: No saved copy of session 00000000-0000-4000-8000-000000000000 was found remotely. Check the id, or run `grok --resume` to pick a session.\n",
+  "lines": [
+    {
+      "t": 1051,
+      "json": {
+        "type": "error",
+        "message": "No saved copy of session 00000000-0000-4000-8000-000000000000 was found remotely. Check the id, or run `grok --resume` to pick a session."
+      }
+    }
+  ]
+}
