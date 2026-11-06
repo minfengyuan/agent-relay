@@ -17,7 +17,7 @@ if (mode === "malformed") {
   process.exit(19);
 } else {
   let cancelled = false;
-  acp.agent({ name: "fake-grok" })
+  acp.agent({ name: "fake-agent" })
     .onRequest(acp.methods.agent.initialize, (ctx) => {
       log(`initialize:${JSON.stringify(ctx.params.clientCapabilities)}`);
       log(`client:${JSON.stringify(ctx.params.clientInfo)}`);

@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { cleanupAllChildren, CursorRunner, GrokRunner, OpenCodeRunner } from "../src/runner.js";
+import { cleanupAllChildren, CursorRunner, OpenCodeRunner } from "../src/runner.js";
 import { SessionStore } from "../src/store.js";
-import { baseConfig, tempDir, useRunnerCleanup, waitForLog } from "./helpers.js";
+import { TestAcpRunner, baseConfig, tempDir, useRunnerCleanup, waitForLog } from "./helpers.js";
 
 const dirs: string[] = [];
 useRunnerCleanup(dirs);
@@ -12,7 +12,7 @@ describe("workspace locks", () => {
     vi.stubEnv("XAI_API_KEY", "");
     const state = await tempDir(dirs);
     const cwd = await tempDir(dirs);
-    const grok = await new GrokRunner(baseConfig(state), new SessionStore(state)).delegate({ task: "grok", cwd });
+    const grok = await new TestAcpRunner(baseConfig(state), new SessionStore(state)).delegate({ task: "grok", cwd });
     const cursor = await new CursorRunner(baseConfig(state), new SessionStore(state, "cursor")).delegate({ task: "cursor", cwd });
     expect(grok.sessionId).toBe(cursor.sessionId);
     await expect(new SessionStore(state).read("fake-session-1", cwd)).resolves.toMatchObject({ sessionId: "fake-session-1" });
@@ -27,7 +27,7 @@ describe("workspace locks", () => {
     vi.stubEnv("FAKE_SESSION_ID", "lock-session");
     const active = new CursorRunner(baseConfig(state), new SessionStore(state, "cursor")).delegate({ task: "hang", cwd });
     await waitForLog(log, "prompt:lock-session");
-    await expect(new GrokRunner(baseConfig(state), new SessionStore(state)).delegate({ task: "blocked", cwd }))
+    await expect(new TestAcpRunner(baseConfig(state), new SessionStore(state)).delegate({ task: "blocked", cwd }))
       .rejects.toMatchObject({ code: "WORKSPACE_BUSY" });
     await cleanupAllChildren();
     await expect(active).rejects.toMatchObject({ code: "CANCELLED" });
@@ -37,7 +37,7 @@ describe("workspace locks", () => {
     vi.stubEnv("XAI_API_KEY", "");
     const state = await tempDir(dirs);
     const cwd = await tempDir(dirs);
-    const grok = await new GrokRunner(baseConfig(state), new SessionStore(state)).delegate({ task: "grok", cwd });
+    const grok = await new TestAcpRunner(baseConfig(state), new SessionStore(state)).delegate({ task: "grok", cwd });
     const cursor = await new CursorRunner(baseConfig(state), new SessionStore(state, "cursor")).delegate({
       task: "cursor",
       cwd,
@@ -63,7 +63,7 @@ describe("workspace locks", () => {
     vi.stubEnv("FAKE_SESSION_ID", "lock-session");
     const active = new OpenCodeRunner(baseConfig(state), new SessionStore(state, "opencode")).delegate({ task: "hang", cwd });
     await waitForLog(log, "prompt:lock-session");
-    await expect(new GrokRunner(baseConfig(state), new SessionStore(state)).delegate({ task: "blocked", cwd }))
+    await expect(new TestAcpRunner(baseConfig(state), new SessionStore(state)).delegate({ task: "blocked", cwd }))
       .rejects.toMatchObject({ code: "WORKSPACE_BUSY" });
     await expect(new CursorRunner(baseConfig(state), new SessionStore(state, "cursor")).delegate({ task: "blocked", cwd }))
       .rejects.toMatchObject({ code: "WORKSPACE_BUSY" });

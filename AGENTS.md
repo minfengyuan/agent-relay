@@ -4,7 +4,7 @@ This file is the default entry point for coding agents working in this repositor
 
 ## Project in one paragraph
 
-`agent-relay` is a local Node.js/TypeScript MCP server that lets any local stdio MCP client delegate work to ACP coding agents or native Codex. `src/server.ts` exposes the MCP tools; `src/runner/acp-runner.ts` and `src/runner/codex-runner.ts` own protocol execution, sharing shutdown registration in `src/runner/lifecycle.ts`. `src/adapters/` contains ACP provider policy, and `src/store.ts` persists resumable session metadata and serializes access to a working directory.
+`agent-relay` is a local Node.js/TypeScript MCP server that lets any local stdio MCP client delegate work to ACP coding agents or native Codex. `src/server.ts` exposes the MCP tools; `src/runner/acp-runner.ts` and `src/runner/codex-runner.ts` own protocol execution. `src/runner/worker-host.ts` owns the protocol-independent worker lifecycle used by Codex, while `src/runner/lifecycle.ts` owns process-wide admission and shutdown. `src/adapters/` contains ACP provider policy, and `src/store.ts` persists resumable session metadata and serializes access to a working directory.
 
 ## Read next only when relevant
 
@@ -42,6 +42,7 @@ Real-agent smoke tests are opt-in because they require local CLIs/authentication
 - `src/cli.ts` — stdio MCP entry point and shutdown cleanup.
 - `src/server.ts` — MCP schemas, tool registration, input validation, structured error/result mapping.
 - `src/runner/acp-runner.ts` — ACP handshake, session create/load/resume, prompt execution, progress, cancellation, timeouts, and child cleanup.
+- `src/runner/worker-host.ts` — protocol-independent admission, lease, spawn, process-tree, cancellation, and cleanup lifecycle.
 - `src/runner/codex-runner.ts` — native Codex app-server threads/turns, sandbox/approval policy, cancellation, and cleanup.
 - `src/runner/lifecycle.ts` — shared task admission, shutdown registration, and cleanup aggregation.
 - `src/runner/` — shared limits, summaries, helpers, and adapter contracts.

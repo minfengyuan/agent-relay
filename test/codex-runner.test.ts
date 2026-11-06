@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { CodexRunner, GrokRunner, cleanupAllChildren } from "../src/runner.js";
+import { CodexRunner, cleanupAllChildren } from "../src/runner.js";
 import { SessionStore } from "../src/store.js";
 import { RelayFailure } from "../src/types.js";
 import { probeProcess } from "../src/runner/process-tree.js";
-import { baseConfig, tempDir, useRunnerCleanup, waitForLog } from "./helpers.js";
+import { TestAcpRunner, baseConfig, tempDir, useRunnerCleanup, waitForLog } from "./helpers.js";
 
 const dirs: string[] = [];
 useRunnerCleanup(dirs);
@@ -190,7 +190,7 @@ describe("CodexRunner", () => {
     const outcome = task.catch((error: unknown) => error);
     await waitForLog(log, '"method":"turn/start"');
     const other = await tempDir(dirs);
-    const acpTask = new GrokRunner(config, new SessionStore(config.stateDir)).delegate({ task: "hang", cwd: other });
+    const acpTask = new TestAcpRunner(config, new SessionStore(config.stateDir)).delegate({ task: "hang", cwd: other });
     const acpOutcome = acpTask.catch((error: unknown) => error);
     await cleanupAllChildren();
     expect(await outcome).toMatchObject({ code: "CANCELLED" });
@@ -205,7 +205,7 @@ describe("CodexRunner", () => {
     const outcome = task.catch((error: unknown) => error);
     try {
       await waitForLog(log, '"method":"turn/start"');
-      await expect(new GrokRunner(config, new SessionStore(state)).delegate({ task: "hello", cwd })).rejects.toMatchObject({ code: "WORKSPACE_BUSY" });
+      await expect(new TestAcpRunner(config, new SessionStore(state)).delegate({ task: "hello", cwd })).rejects.toMatchObject({ code: "WORKSPACE_BUSY" });
       const other = await tempDir(dirs);
       expect((await runner.delegate({ task: "hello", cwd: other })).text).toBe("hello 世界");
     } finally { controller.abort(); await outcome; }

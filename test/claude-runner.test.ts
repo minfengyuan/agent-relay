@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { claudeSpawnSpec } from "../src/adapters/claude.js";
 import { loadConfig } from "../src/config.js";
-import { ClaudeRunner, CodexRunner, GrokRunner, cleanupAllChildren } from "../src/runner.js";
+import { ClaudeRunner, CodexRunner, cleanupAllChildren } from "../src/runner.js";
 import { SessionStore } from "../src/store.js";
-import { baseConfig, claudeFixture, tempDir, useRunnerCleanup, waitForLog } from "./helpers.js";
+import { TestAcpRunner, baseConfig, claudeFixture, tempDir, useRunnerCleanup, waitForLog } from "./helpers.js";
 
 const dirs: string[] = [];
 vi.setConfig({ testTimeout: 15000 });
@@ -233,7 +233,7 @@ describe("ClaudeRunner", () => {
     await waitForLog(log, "prompt:claude-session");
     try {
       for (const other of [
-        new GrokRunner(config, new SessionStore(state)),
+        new TestAcpRunner(config, new SessionStore(state)),
         new CodexRunner(config, new SessionStore(state, "codex")),
       ]) {
         await expect(other.delegate({ task: "two", cwd })).rejects.toMatchObject({ code: "WORKSPACE_BUSY" });

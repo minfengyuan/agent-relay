@@ -2,9 +2,9 @@ import { readFile } from "node:fs/promises";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { beginRunnerShutdown, cleanupAllChildren, GrokRunner } from "../src/runner.js";
+import { beginRunnerShutdown, cleanupAllChildren } from "../src/runner.js";
 import { SessionStore } from "../src/store.js";
-import { baseConfig, cleanupDirs, clearDelegatedEnv, tempDir, waitForLog } from "./helpers.js";
+import { TestAcpRunner, baseConfig, cleanupDirs, clearDelegatedEnv, tempDir, waitForLog } from "./helpers.js";
 import type * as ProcessTree from "../src/runner/process-tree.js";
 
 const captured = vi.hoisted(() => ({ children: [] as ChildProcessWithoutNullStreams[] }));
@@ -50,7 +50,7 @@ describe("runner shutdown gate", () => {
     const log = join(stateDir, "shutdown.log");
     vi.stubEnv("FAKE_ACP_LOG", log);
 
-    const active = new GrokRunner(baseConfig(stateDir), new SessionStore(stateDir))
+    const active = new TestAcpRunner(baseConfig(stateDir), new SessionStore(stateDir))
       .delegate({ task: "hang", cwd: activeCwd });
     // Attach immediately: global shutdown intentionally waits for this rejection.
     const activeRejected = expect(active).rejects.toMatchObject({ code: "CANCELLED" });
@@ -62,7 +62,7 @@ describe("runner shutdown gate", () => {
     await activeRejected;
     await expect(first).resolves.toBeUndefined();
 
-    await expect(new GrokRunner(baseConfig(stateDir), new SessionStore(stateDir))
+    await expect(new TestAcpRunner(baseConfig(stateDir), new SessionStore(stateDir))
       .delegate({ task: "must not spawn", cwd: laterCwd }))
       .rejects.toMatchObject({ code: "CANCELLED", message: expect.stringMatching(/shutting down/i) });
     expect((await readFile(log, "utf8")).match(/prompt:fake-session-1/g)).toHaveLength(1);

@@ -6,9 +6,9 @@ import { describe, expect, it, vi } from "vitest";
 import { dshSpawnSpec, resolveWindowsDshLauncher } from "../src/adapters/dsh.js";
 import { loadConfig } from "../src/config.js";
 import { dshPolicyPatch } from "../src/adapters/dsh-policy.js";
-import { DshRunner, GrokRunner, OpenCodeRunner } from "../src/runner.js";
+import { DshRunner, OpenCodeRunner } from "../src/runner.js";
 import { SessionStore } from "../src/store.js";
-import { baseConfig as config, dshFixture, tempDir as makeTempDir, useRunnerCleanup, waitForLog } from "./helpers.js";
+import { TestAcpRunner, baseConfig as config, dshFixture, tempDir as makeTempDir, useRunnerCleanup, waitForLog } from "./helpers.js";
 
 const dirs: string[] = [];
 vi.setConfig({ testTimeout: 15_000 });
@@ -472,7 +472,7 @@ describe("DshRunner", () => {
     const state = await tempDir();
     const cwd = await tempDir();
     const dsh = await new DshRunner(config(state), new SessionStore(state, "dsh")).delegate({ task: "dsh", cwd });
-    const grok = await new GrokRunner(config(state), new SessionStore(state)).delegate({ task: "grok", cwd });
+    const grok = await new TestAcpRunner(config(state), new SessionStore(state)).delegate({ task: "grok", cwd });
     expect(dsh.sessionId).toBe(grok.sessionId);
     await expect(new SessionStore(state, "dsh").read("fake-session-1", cwd)).resolves.toMatchObject({
       sessionId: "fake-session-1",
@@ -487,7 +487,7 @@ describe("DshRunner", () => {
     vi.stubEnv("FAKE_SESSION_ID", "lock-session");
     const active = new DshRunner(config(state), new SessionStore(state, "dsh")).delegate({ task: "hang", cwd });
     await waitForLog(log, "prompt:lock-session");
-    await expect(new GrokRunner(config(state), new SessionStore(state)).delegate({ task: "blocked", cwd }))
+    await expect(new TestAcpRunner(config(state), new SessionStore(state)).delegate({ task: "blocked", cwd }))
       .rejects.toMatchObject({ code: "WORKSPACE_BUSY" });
     const { cleanupAllChildren } = await import("../src/runner.js");
     await cleanupAllChildren();

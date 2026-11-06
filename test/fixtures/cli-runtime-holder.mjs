@@ -2,7 +2,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runCli } from "../../dist/cli-runtime.js";
-import { beginRunnerShutdown, GrokRunner } from "../../dist/runner.js";
+import { beginRunnerShutdown, CodexRunner } from "../../dist/runner.js";
 import { SessionStore } from "../../dist/store.js";
 
 const [stateDir, log, mode] = process.argv.slice(2);
@@ -42,7 +42,7 @@ process.on("message", async (message) => {
   const first = runtime.shutdown("SIGTERM"), second = runtime.shutdown("SIGINT");
   if (mode === "gate") {
     try {
-      await new GrokRunner(config, new SessionStore(stateDir)).delegate({ task: "rejected", cwd: message.cwd });
+      await new CodexRunner(config, new SessionStore(stateDir)).delegate({ task: "rejected", cwd: message.cwd });
       process.send({ event: "gate-result", code: "UNEXPECTED_SUCCESS", same: first === second });
     } catch (error) {
       process.send({ event: "gate-result", code: error.code, same: first === second });

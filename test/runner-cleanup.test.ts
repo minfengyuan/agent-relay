@@ -85,7 +85,7 @@ describe("AcpRunner cleanup failure", () => {
   });
   it.each(["unconfirmed", "throw"] as const)("retains partial output and the cwd lock when cleanup returns %s", async (mode) => {
     state.report = mode;
-    const { GrokRunner } = await import("../src/runner.js");
+    const { TestAcpRunner } = await import("./helpers.js");
     const { SessionStore } = await import("../src/store.js");
     const { baseConfig, tempDir } = await import("./helpers.js");
     vi.stubEnv("XAI_API_KEY", "");
@@ -100,7 +100,7 @@ describe("AcpRunner cleanup failure", () => {
         return lease;
       }
     }
-    await expect(new GrokRunner(baseConfig(stateDir), new CountingStore(stateDir)).delegate({ task: "ok", cwd }))
+    await expect(new TestAcpRunner(baseConfig(stateDir), new CountingStore(stateDir)).delegate({ task: "ok", cwd }))
       .rejects.toMatchObject({
         code: "PROCESS_CLEANUP_FAILED",
         partial: { sessionId: "fake-session-1", text: "fresh answer", truncated: false },
@@ -111,21 +111,22 @@ describe("AcpRunner cleanup failure", () => {
   });
 
   it("overrides the original task error while retaining its code in the diagnostic message", async () => {
-    const { GrokRunner } = await import("../src/runner.js");
+    const { TestAcpRunner } = await import("./helpers.js");
     const { SessionStore } = await import("../src/store.js");
     const { baseConfig, tempDir } = await import("./helpers.js");
     vi.stubEnv("XAI_API_KEY", "");
     vi.stubEnv("FAKE_ACP_MODE", "permission");
     const stateDir = await tempDir(dirs);
     const cwd = await tempDir(dirs);
-    await expect(new GrokRunner(baseConfig(stateDir), new SessionStore(stateDir)).delegate({ task: "permission", cwd }))
+    await expect(new TestAcpRunner(baseConfig(stateDir), new SessionStore(stateDir)).delegate({ task: "permission", cwd }))
       .rejects.toMatchObject({ code: "PROCESS_CLEANUP_FAILED", message: expect.stringContaining("UNEXPECTED_PERMISSION") });
     await expect(new SessionStore(stateDir).acquire(cwd)).rejects.toMatchObject({ code: "WORKSPACE_BUSY" });
   });
 
   it.each(["unconfirmed", "throw"] as const)("shares cancellation with shutdown and retains the lock when termination is %s", async (mode) => {
     state.report = mode;
-    const { GrokRunner, cleanupAllChildren } = await import("../src/runner.js");
+    const { cleanupAllChildren } = await import("../src/runner.js");
+    const { TestAcpRunner } = await import("./helpers.js");
     const { SessionStore } = await import("../src/store.js");
     const { baseConfig, tempDir, waitForLog } = await import("./helpers.js");
     vi.stubEnv("XAI_API_KEY", "");
@@ -135,7 +136,7 @@ describe("AcpRunner cleanup failure", () => {
     const log = join(stateDir, "cancel.log");
     vi.stubEnv("FAKE_ACP_LOG", log);
     const abort = new AbortController();
-    const pending = new GrokRunner(baseConfig(stateDir), new SessionStore(stateDir)).delegate({ task: "hang", cwd }, abort.signal);
+    const pending = new TestAcpRunner(baseConfig(stateDir), new SessionStore(stateDir)).delegate({ task: "hang", cwd }, abort.signal);
     void pending.catch(() => undefined);
     await waitForLog(log, "prompt:fake-session-1");
     abort.abort();

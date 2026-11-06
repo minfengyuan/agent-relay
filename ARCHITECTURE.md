@@ -84,11 +84,14 @@ After `initialize`/`initialized`, Codex checks `account/read` without initiating
 
 Every turn explicitly applies workspace-write sandboxing with sandbox network access disabled, default temporary-directory access, on-request approvals routed to the user, and no automatic approval. Approval requests are declined and fail with `PERMISSION_REQUIRED`; questions/elicitation fail with `INTERACTION_REQUIRED`. Local Codex authentication and MCP configuration still apply. Text and tool summaries are bounded, agent-message completion is deduplicated against deltas, and native token usage retains `total`, `last`, and `modelContextWindow` rather than ACP usage semantics. Only `turn/completed` with status `completed` succeeds.
 
-Both runners register with `src/runner/lifecycle.ts` before acquiring a lease. This module owns the synchronous admission gate, active-task registry, shutdown promise, and cleanup diagnostic aggregation. Existing runner exports remain compatible. Codex cancellation first attempts `turn/interrupt` within bounded grace, then uses the existing process-tree controller and lease protocol; unconfirmed cleanup retains the lock and takes precedence over task errors.
+Codex runs on the protocol-independent `src/runner/worker-host.ts`, which owns admission checks, total timeout, caller cancellation, lease acquisition, spawning, process-tree binding, bounded stderr, cleanup ordering, and cleanup diagnostics. The protocol driver supplies `drive(ctx)` and an optional `gracefulCancel(ctx)`; Codex uses the latter to attempt `turn/interrupt` within bounded grace. The host also exposes a bounded helper-subprocess entry for future provider preflight commands.
+
+Both runners register with `src/runner/lifecycle.ts` before acquiring a lease. This module owns the synchronous admission gate, active-task registry, shutdown promise, and cleanup diagnostic aggregation. Existing runner exports remain compatible. Unconfirmed worker cleanup retains the lock and takes precedence over lease and task errors.
 
 ### `src/runner/*`: shared execution primitives
 
 - `types.ts` defines `ProviderAdapter`, summarizer, permission runtime, and session configuration extension points.
+- `worker-host.ts` owns the shared non-ACP worker lifecycle used by native Codex.
 - `limits.ts` bounds output and supplies timeout helpers.
 - `summaries.ts` converts high-volume provider updates into bounded structured summaries. Standard usage/tool-call summaries require an explicit provider; `OpenCodeSummaries(limit)` remains a thin `"opencode"` wrapper.
 - `helpers.ts` centralizes ACP capability/auth/cancellation helpers.

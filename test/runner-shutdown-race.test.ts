@@ -1,11 +1,11 @@
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
 import { expect, it, vi } from "vitest";
-import { beginRunnerShutdown, cleanupAllChildren, GrokRunner } from "../src/runner.js";
+import { beginRunnerShutdown, cleanupAllChildren } from "../src/runner.js";
 import { createRelayServer } from "../src/server.js";
 import { SessionStore } from "../src/store.js";
 import type * as Store from "../src/store.js";
 import { RelayFailure } from "../src/types.js";
-import { baseConfig, cleanupDirs, clearDelegatedEnv, tempDir } from "./helpers.js";
+import { TestAcpRunner, baseConfig, cleanupDirs, clearDelegatedEnv, tempDir } from "./helpers.js";
 
 const state = vi.hoisted(() => ({ beforeResolve: async () => {} }));
 vi.mock("../src/store.js", async (load) => {
@@ -38,7 +38,7 @@ it("snapshots blocked acquisition, rejects delayed cwd resolution, and caches a 
     }
   }
   const acquireSpy = vi.spyOn(SessionStore.prototype, "acquire");
-  const task = new GrokRunner(config, new DelayedStore(root)).delegate({ task: "cancel before spawn", cwd });
+  const task = new TestAcpRunner(config, new DelayedStore(root)).delegate({ task: "cancel before spawn", cwd });
   const taskOutcome = task.catch((error: unknown) => error);
   const server = createRelayServer(config);
   const [client, transport] = InMemoryTransport.createLinkedPair();

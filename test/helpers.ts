@@ -5,6 +5,53 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, vi } from "vitest";
 import type { RelayConfig } from "../src/config.js";
 import { cleanupAllChildren } from "../src/runner.js";
+import type { SessionStore } from "../src/store.js";
+import { RelayFailure, type DelegateInput, type GrokRelayResult } from "../src/types.js";
+import { AcpRunner } from "../src/runner/acp-runner.js";
+import { authMethodIds, cancelledPermission } from "../src/runner/helpers.js";
+import { EmptySummarizer } from "../src/runner/summaries.js";
+import type { ProviderAdapter } from "../src/runner/types.js";
+
+function testAcpAdapter(config: RelayConfig): ProviderAdapter<DelegateInput, GrokRelayResult> {
+  return {
+    provider: "grok",
+    displayName: "Grok",
+    command: () => ({ command: config.command, args: config.commandArgs }),
+    authenticate(initialized) {
+      const authIds = authMethodIds(initialized);
+      const preferred = process.env.XAI_API_KEY && authIds.includes("xai.api_key")
+        ? "xai.api_key"
+        : authIds.includes("cached_token") ? "cached_token" : undefined;
+      if (!preferred) {
+        throw new RelayFailure("AUTH_UNAVAILABLE", "No non-interactive Grok authentication is available (xai.api_key or cached_token)");
+      }
+      return preferred;
+    },
+    authenticateParams(methodId) {
+      return { methodId, _meta: { headless: true } };
+    },
+    capabilities: {},
+    permissionWarning: () => "Grok workspace sandboxing allows its state directory and child network access; built-in web search/fetch are disabled. This is not complete network isolation.",
+    prompt: (task) => task,
+    sessionMetadata: () => ({}),
+    createSummarizer: () => new EmptySummarizer(),
+    handlePermission(_params, rt) {
+      rt.markRequested();
+      queueMicrotask(() => rt.abort(new RelayFailure(
+        "UNEXPECTED_PERMISSION",
+        "Grok requested permission despite --always-approve",
+        rt.partial(),
+      )));
+      return cancelledPermission();
+    },
+  };
+}
+
+export class TestAcpRunner extends AcpRunner<DelegateInput, GrokRelayResult> {
+  constructor(config: RelayConfig, store: SessionStore) {
+    super(config, store, testAcpAdapter(config));
+  }
+}
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 export const grokFixture = join(fixtures, "fake-agent.mjs");
