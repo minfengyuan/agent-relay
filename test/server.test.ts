@@ -194,7 +194,8 @@ describe("MCP server", () => {
       const outcome = (delegate.mock.results[0]?.value as Promise<unknown>).catch((error: unknown) => error);
       await notify("notifications/cancelled", { requestId: 8, reason: "test" });
       expect(await outcome).toMatchObject({ code: "CANCELLED", partial: { provider: "claude", sessionId } });
-      await waitForLog(join(stateDir, "cancel.log"), "root-sigterm");
+      // Windows has no graceful signal; the relay stops the tree with taskkill instead.
+      if (process.platform !== "win32") await waitForLog(join(stateDir, "cancel.log"), "root-sigterm");
       const lease = await new SessionStore(stateDir).acquire(cwd);
       await lease.markReaped("no-worker-created");
       await lease.release();
@@ -399,7 +400,7 @@ describe("MCP server", () => {
     await server.close();
   });
 
-  it.runIf(process.platform === "win32")("returns a structured cleanup failure and retains the original partial result", async () => {
+  it.runIf(process.platform === "win32")("counts a headless root exit as cleanup on Windows and reports the missing end event", async () => {
     vi.stubEnv("FAKE_GROK_NO_EVENTS", "1");
     const cwd = await mkdtemp(join(tmpdir(), "relay-server-cwd-"));
     dirs.push(cwd);
@@ -418,7 +419,7 @@ describe("MCP server", () => {
         stopReason: null,
         text: "",
         truncated: false,
-        error: { code: "PROCESS_CLEANUP_FAILED" },
+        error: { code: "ACP_FAILURE" },
       },
     });
     await clientTransport.close();
@@ -526,7 +527,8 @@ describe("MCP server", () => {
     }) as Promise<{ result?: { isError?: boolean; structuredContent?: { error?: { code?: string }; sessionId?: string; provider?: string } } }>;
     await waitForLog(hangLog, "prompt:cancel-session");
     await notify("notifications/cancelled", { requestId: 13, reason: "test cancel" });
-    await waitForLog(hangLog, "cancel:cancel-session");
+    // Windows has no graceful signal; the relay stops the tree with taskkill instead.
+    if (process.platform !== "win32") await waitForLog(hangLog, "cancel:cancel-session");
     const cancelledResult = await Promise.race([
       cancelled,
       new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 1_000)),
