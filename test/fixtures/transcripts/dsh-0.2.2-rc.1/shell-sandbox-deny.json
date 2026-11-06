@@ -1,0 +1,154 @@
+{
+  "scenario": "S2-1b shell redirect outside workspace under workspace-write + --approval-policy never",
+  "command": "dsh",
+  "args": [
+    "--profile",
+    "headless",
+    "--patch",
+    "<SPIKE>/dsh-policy-full.yml",
+    "--json",
+    "--permission-mode",
+    "workspace-write",
+    "--approval-policy",
+    "never",
+    "-"
+  ],
+  "stdin": "Use your bash/shell tool (NOT the write or edit tool) to run exactly this command once: `echo x > <HOME>/agent-relay-spike-shell-deny.txt && echo written`. Do not retry with another tool or path, and do not request escalation. Report the exact tool output.",
+  "signalSentMs": null,
+  "exitMs": 5054,
+  "exitCode": 0,
+  "exitSignal": null,
+  "stderr": "[llm-deepseek-api-key] model listing from https://api.deepseek.com/models loaded 2 model(s), skipped 0 row(s)\n",
+  "lines": [
+    {
+      "t": 1764,
+      "json": {
+        "type": "session",
+        "sessionId": "session-5a04fc8b-d04d-44c2-910c-227a4bd9fa75",
+        "cwd": "<SPIKE>/ws9"
+      }
+    },
+    {
+      "t": 1764,
+      "json": {
+        "type": "status",
+        "phase": "turn_start",
+        "turn": 1
+      }
+    },
+    {
+      "t": 1826,
+      "json": {
+        "type": "status",
+        "phase": "step_start",
+        "turn": 1,
+        "step": 1
+      }
+    },
+    {
+      "t": 3427,
+      "json": {
+        "type": "thinking",
+        "text": "The user asks me to run exactly this command once: `echo x > <HOME>/agent-relay-spike-shell-deny.txt && echo written`. The path is outside the workspace. The sandbox mode is workspace-write, so writing to <HOME>/... will likely be denied by the sandbox. The user explicitly says run it once, do not retry with another tool or path, do not request escalation. So I should run it once and report the exact tool output.\n\nLet me run it."
+      }
+    },
+    {
+      "t": 3428,
+      "json": {
+        "type": "tool_call",
+        "callId": "call_00_2GaYU9piyB6Uqq28Qipg7803",
+        "tool": "bash",
+        "input": {
+          "description": "Write marker file outside workspace",
+          "command": "echo x > <HOME>/agent-relay-spike-shell-deny.txt && echo written"
+        }
+      }
+    },
+    {
+      "t": 3459,
+      "json": {
+        "type": "tool_result",
+        "callId": "call_00_2GaYU9piyB6Uqq28Qipg7803",
+        "status": "completed",
+        "result": "[stderr]\nbash: line 1: <HOME>/agent-relay-spike-shell-deny.txt: Operation not permitted\n[sandbox: file access denied under workspace-write mode]\n[sandbox: escalation available — retry this exact command once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]\n[exit code: 1]"
+      }
+    },
+    {
+      "t": 3459,
+      "json": {
+        "type": "status",
+        "phase": "step_end",
+        "turn": 1,
+        "step": 1,
+        "usage": {
+          "inputTokens": 2799,
+          "outputTokens": 187,
+          "cacheReadTokens": 4992,
+          "cacheWriteTokens": 0,
+          "totalTokens": 7978
+        }
+      }
+    },
+    {
+      "t": 3468,
+      "json": {
+        "type": "status",
+        "phase": "step_start",
+        "turn": 1,
+        "step": 2
+      }
+    },
+    {
+      "t": 4996,
+      "json": {
+        "type": "thinking",
+        "text": ""
+      }
+    },
+    {
+      "t": 4996,
+      "json": {
+        "type": "text",
+        "text": "I ran the command exactly once, as requested. Tool output:\n\n```\n[stderr]\nbash: line 1: <HOME>/agent-relay-spike-shell-deny.txt: Operation not permitted\n[sandbox: file access denied under workspace-write mode]\n[sandbox: escalation available — retry this exact command once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]\n[exit code: 1]\n```\n\nThe write was blocked by the file sandbox. The `&& echo written` branch did not run. I did not retry and did not request escalation."
+      }
+    },
+    {
+      "t": 4996,
+      "json": {
+        "type": "status",
+        "phase": "step_end",
+        "turn": 1,
+        "step": 2,
+        "usage": {
+          "inputTokens": 141,
+          "outputTokens": 136,
+          "cacheReadTokens": 7936,
+          "cacheWriteTokens": 0,
+          "totalTokens": 8213
+        }
+      }
+    },
+    {
+      "t": 4996,
+      "json": {
+        "type": "status",
+        "phase": "turn_end",
+        "turn": 1,
+        "reason": {
+          "kind": "completed"
+        }
+      }
+    },
+    {
+      "t": 5003,
+      "json": {
+        "type": "final",
+        "sessionId": "session-5a04fc8b-d04d-44c2-910c-227a4bd9fa75",
+        "reason": {
+          "kind": "completed"
+        },
+        "text": "I ran the command exactly once, as requested. Tool output:\n\n```\n[stderr]\nbash: line 1: <HOME>/agent-relay-spike-shell-deny.txt: Operation not permitted\n[sandbox: file access denied under workspace-write mode]\n[sandbox: escalation available — retry this exact command once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]\n[exit code: 1]\n```\n\nThe write was blocked by the file sandbox. The `&& echo written` branch did not run. I did not retry and did not request escalation."
+      }
+    }
+  ]
+}

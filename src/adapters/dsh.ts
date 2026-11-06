@@ -116,6 +116,14 @@ export function dshAdapter(config: RelayConfig): HeadlessAdapter<DshDelegateInpu
               title: `DSH ${error.code}: ${string(event.result) || string(event.callId)}`, ...session,
             };
           }
+          // A shell command denied by the sandbox returns a completed tool_result with no error code;
+          // DSH 0.2.2-rc.1 only marks it in the result text (shell-sandbox-deny.json).
+          if (string(event.result).includes("[sandbox: file access denied under")) {
+            return {
+              type: "permissionDenied", id: string(event.callId),
+              title: `DSH shell sandbox denial: ${string(event.result)}`, ...session,
+            };
+          }
           return {
             type: "toolResult", id: string(event.callId),
             status: event.status === "completed" ? "completed" : event.status === "error" ? "failed" : string(event.status),

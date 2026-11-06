@@ -212,7 +212,7 @@ Relay 运行 `dsh --profile headless`，逐行读取 JSON 事件。Relay 自有�
 
 输入为 `task`、绝对路径 `cwd`，以及可选的 `sessionId`、`model`、`reasoningEffort`。请求 model 或 effort 时，Relay 先在同一工作目录 lease 和超时约束下运行 `dsh --profile headless --patch <permissions> --dump-config`，读取 `agent-default-model.provider`。输出无法解析返回 `INVALID_CONFIG`；预检超时返回 `CONFIG_TIMEOUT`。Relay 不在本地校验模型名；DSH 对未知模型返回通用 `INVALID_REQUEST`，Relay 以带 DSH 错误码和消息的 `ACP_FAILURE` 返回。恢复时省略 `reasoningEffort`，只有 provider/model 路由相同时才保留已保存的显式强度。
 
-新建和恢复的每一轮都显式使用 `--permission-mode workspace-write --approval-policy never`。内置 Web search/fetch 被禁用；shell 网络和外部 MCP 服务仍可用，因此不构成网络隔离。可识别的 `FS_SANDBOX_DENIED`、`AUTO_REVIEW_DENIED` 工具结果会在轮次结束后返回 `PERMISSION_REQUIRED`，并保留后续文本。其他工具错误不算权限拒绝。shell 命令内部的拒绝可能不带可识别错误码，此时只能作为普通工具失败报告。`tool_result.completed` 只表示工具已返回，不代表 shell 命令成功退出。
+新建和恢复的每一轮都显式使用 `--permission-mode workspace-write --approval-policy never`。内置 Web search/fetch 被禁用；shell 网络和外部 MCP 服务仍可用，因此不构成网络隔离。可识别的 `FS_SANDBOX_DENIED`、`AUTO_REVIEW_DENIED` 工具结果会在轮次结束后返回 `PERMISSION_REQUIRED`，并保留后续文本。shell 命令被沙箱拒绝时，工具结果为 completed 且没有错误码；relay 根据 DSH 结果文本中的 `[sandbox: file access denied under …]` 标记识别它，同样返回 `PERMISSION_REQUIRED`。命令自己输出这段标记时也会这样处理。其他工具错误不算权限拒绝。`tool_result.completed` 只表示工具已返回，不代表 shell 命令成功退出。
 
 只有退出码 `0` 且 `final.reason.kind: "completed"` 才算成功。结果文本取自限长后的 `final.text`；DSH 工具调用生成摘要，usage 省略。凭据缺失映射为 `AUTH_UNAVAILABLE`；未知会话和 cwd 不匹配分别映射为 `UNKNOWN_SESSION`、`CWD_MISMATCH`，其他轮次或启动失败使用 `ACP_FAILURE`。取消时先发送 SIGTERM，等待配置的宽限时间，再终止剩余进程树。必须等调用结束再恢复会话，因为只有确认进程清理后才释放工作目录 lease。
 

@@ -124,7 +124,22 @@ describe.skipIf(process.platform === "win32")("DSH headless runner", () => {
     const adapter = dshAdapter(fixture.config);
     const denial = (await transcript("sandbox-deny")).lines.find((line) => line.json.type === "tool_result")!.json;
     expect(adapter.decode({ ...denial, error: { code: "AUTO_REVIEW_DENIED" } })).toMatchObject({ type: "permissionDenied" });
-    expect(adapter.decode({ ...denial, error: { code: "OTHER_ERROR" } })).toMatchObject({ type: "toolResult", status: "failed" });
+    expect(adapter.decode({ ...denial, error: { code: "OTHER_ERROR" } })).toMatchObject({ type: "permissionDenied" });
+    expect(adapter.decode({ ...denial, result: "Error: no such file", error: { code: "OTHER_ERROR" } }))
+      .toMatchObject({ type: "toolResult", status: "failed" });
+  });
+
+  it("returns PERMISSION_REQUIRED when a shell command is denied inside a completed tool result", async () => {
+    const fixture = await setup();
+    vi.stubEnv("FAKE_DSH_TRANSCRIPT", "shell-sandbox-deny");
+    await expect(fixture.runner.delegate({ cwd: fixture.cwd, task: "task" })).rejects.toMatchObject({
+      code: "PERMISSION_REQUIRED",
+      partial: { text: expect.stringContaining("blocked by the file sandbox") },
+    });
+    const adapter = dshAdapter(fixture.config);
+    const denial = (await transcript("shell-sandbox-deny")).lines.find((line) => line.json.type === "tool_result")!.json;
+    expect(adapter.decode(denial)).toMatchObject({ type: "permissionDenied" });
+    expect(adapter.decode({ ...denial, result: "[exit code: 1]" })).toMatchObject({ type: "toolResult", status: "completed" });
   });
 
   it("cancels with root SIGTERM and does not mistake exit 0 without final for success", async () => {
