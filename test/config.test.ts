@@ -16,7 +16,8 @@ describe("loadConfig", () => {
   it("keeps the Grok workspace sandbox and disables native web tools", () => {
     expect(loadConfig({}).commandArgs).toEqual([
       "--no-auto-update", "--sandbox", "workspace", "--disable-web-search",
-      "--deny", "WebFetch", "--deny", "WebSearch", "agent", "--always-approve", "--no-leader", "stdio",
+      "--deny", "WebFetch", "--deny", "WebSearch", "--always-approve",
+      "--disallowed-tools", "ask_user_question", "--no-wait-for-background", "--output-format", "streaming-json",
     ]);
   });
   it("defaults to native codex and trims its executable override", () => {

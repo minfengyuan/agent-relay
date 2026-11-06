@@ -55,6 +55,7 @@ export class TestAcpRunner extends AcpRunner<DelegateInput, GrokRelayResult> {
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 export const grokFixture = join(fixtures, "fake-agent.mjs");
+export const grokHeadlessFixture = join(fixtures, "fake-grok-headless.mjs");
 export const cursorFixture = grokFixture;
 export const opencodeFixture = join(fixtures, "fake-opencode-agent.mjs");
 export const dshFixture = join(fixtures, "fake-dsh-headless.mjs");

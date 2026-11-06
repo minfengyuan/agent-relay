@@ -14,7 +14,7 @@ process.on("SIGTERM", () => {
   writer.kill("SIGTERM");
 });
 acp.agent({ name: "cli-lifecycle-fixture" })
-  .onRequest(acp.methods.agent.initialize, () => ({ protocolVersion: 1, agentCapabilities: {}, authMethods: [{ id: "cached_token", name: "Fixture token" }] }))
+  .onRequest(acp.methods.agent.initialize, () => ({ protocolVersion: 1, agentCapabilities: {}, authMethods: [{ id: "opencode-login", name: "Fixture login" }] }))
   .onRequest(acp.methods.agent.authenticate, () => ({}))
   .onRequest(acp.methods.agent.session.new, () => ({ sessionId: `cli-fixture-${process.pid}` }))
   .onRequest(acp.methods.agent.session.prompt, async ({ params }) => {

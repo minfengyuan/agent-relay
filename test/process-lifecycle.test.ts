@@ -80,7 +80,7 @@ async function start(mode = "normal", actualEntry = false) {
   send({ jsonrpc: "2.0", method: "notifications/initialized" });
   return { state, cwd, log, child, ipc, invalid, stderr: () => stderr,
     call: (id: number, path: string) => send({ jsonrpc: "2.0", id, method: "tools/call", params: {
-      name: "grok_delegate", arguments: { task: "hang", cwd: path },
+      name: "opencode_delegate", arguments: { task: "hang", cwd: path },
     } }),
   };
 }

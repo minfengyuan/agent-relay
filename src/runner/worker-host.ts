@@ -27,6 +27,7 @@ export type WorkerOptions = {
   invocation(record?: SessionRecord): { command: string; args: string[] };
   prepare?(env: NodeJS.ProcessEnv, record: SessionRecord | undefined, runHelper: PreparationHelper): Promise<PreparedSpawn>;
   partial?(record: SessionRecord | undefined): RelayResultPartial;
+  onStderr?(tail: string): void;
 };
 
 export type PreparationHelper = (options: {
@@ -140,6 +141,7 @@ export class WorkerHost {
       child.stderr.on("data", (chunk: Buffer) => {
         const bytes = Buffer.concat([Buffer.from(stderr), chunk]);
         stderr = bytes.subarray(Math.max(0, bytes.length - this.config.stderrLimitBytes)).toString("utf8");
+        options.onStderr?.(stderr);
       });
       const ready = (async () => {
         await run(withTimeout(spawned, this.config.phaseTimeoutMs, "SPAWN_TIMEOUT", `${options.displayName} spawn timed out`));

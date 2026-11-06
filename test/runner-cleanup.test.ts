@@ -3,6 +3,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
+import type { GrokRunner } from "../src/adapters/grok.js";
 import type * as ProcessTree from "../src/runner/process-tree.js";
 
 const state = vi.hoisted(() => ({
@@ -153,11 +154,18 @@ describe("AcpRunner cleanup failure", () => {
 
   it("serializes nonempty cleanup-failure partial output through the MCP server", async () => {
     const { createRelayServer } = await import("../src/server.js");
-    const { baseConfig, tempDir } = await import("./helpers.js");
+    const { GrokRunner: GrokRunnerConstructor } = await import("../src/runner.js");
+    const { TestAcpRunner, baseConfig, tempDir } = await import("./helpers.js");
+    const { SessionStore } = await import("../src/store.js");
     vi.stubEnv("XAI_API_KEY", "");
     const stateDir = await tempDir(dirs);
     const cwd = await tempDir(dirs);
     const server = createRelayServer(baseConfig(stateDir));
+    const delegateSpy = vi.spyOn(GrokRunnerConstructor.prototype, "delegate").mockImplementation((
+      input: Parameters<GrokRunner["delegate"]>[0],
+      signal?: AbortSignal,
+      progress?: Parameters<GrokRunner["delegate"]>[2],
+    ) => new TestAcpRunner(baseConfig(stateDir), new SessionStore(stateDir)).delegate(input, signal, progress));
     const [client, transport] = InMemoryTransport.createLinkedPair();
     const responses = new Map<number, (message: JSONRPCMessage) => void>();
     client.onmessage = (message) => {
@@ -180,7 +188,11 @@ describe("AcpRunner cleanup failure", () => {
       structuredContent: { sessionId: "fake-session-1", text: "fresh answer", error: { code: "PROCESS_CLEANUP_FAILED" } },
     });
     expect(JSON.parse(response.result?.content?.[0]?.text ?? "null")).toEqual(response.result?.structuredContent);
-    await client.close();
-    await server.close();
+    try {
+      await client.close();
+      await server.close();
+    } finally {
+      delegateSpy.mockRestore();
+    }
   });
 });

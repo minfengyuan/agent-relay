@@ -159,6 +159,18 @@ Calling client integrates or follows up
 
 Use separate worktrees for independent parallel tasks. Only one task may be active per resolved working directory; overlapping calls to that directory return `WORKSPACE_BUSY`.
 
+### Grok
+
+Grok uses headless streaming JSON (`--output-format streaming-json`), with the CLI's existing authentication. Each headless run starts its own daemon even when leader mode is enabled in user configuration; the relay does not connect to a shared leader or pass the ACP-only `--no-leader` flag.
+
+The relay keeps `--sandbox workspace`, disabled built-in web search/fetch, explicit `WebFetch`/`WebSearch` deny rules, and `--always-approve`. It also passes `--disallowed-tools ask_user_question` and `--no-wait-for-background` for unattended work. Grok state and temporary directories remain writable, and shell networking remains available. These settings do not isolate external MCP services.
+
+Tasks are written verbatim to a private `0600` file and passed with `--prompt-file`; prompt text is not placed in argv. New sessions use a relay-generated UUID with `-s`, persisted after the first event. Resume passes only a relay-recorded UUID with `-r` and the same resolved `--cwd`, avoiding Grok's title matching. Existing ACP UUIDs remain usable through the root `sessions/` namespace. An unknown provider session returns `UNKNOWN_SESSION` without creating a replacement; a `Not signed in` error returns `AUTH_UNAVAILABLE`.
+
+Results retain the common fields only: text is assembled from `text` events, and `stopReason` comes from `end`. Tool events provide progress but no tool or usage summaries. Success requires an `end` event, a stop reason other than `cancelled`, exit code `0`, and no error event. A defensive stderr `permission required:` diagnostic returns `UNEXPECTED_PERMISSION`, including when the CLI exits `0`.
+
+Cancellation first sends SIGTERM and allows at least 12 seconds for Grok to exit before process-tree termination. Grok can emit `end{cancelled}` before its daemon exits, so the relay also waits for exit within that grace. Grok's tool shells run in separate process groups: only Grok's own graceful shutdown reaps those children; force-killing its original process group cannot guarantee cleanup of escaped groups. DSH detached tool groups have the same limitation. Wait for the call to finish before resuming.
+
 ### OpenCode
 
 The relay starts `opencode acp` for both V1 and V2. It sets the child working directory and sends the absolute `cwd` in ACP session requests. It does not pass `--cwd`, which OpenCode V2 rejects. Use `AGENT_RELAY_OPENCODE_COMMAND` to select another executable. Sign in with `opencode auth login` before delegation; the relay uses existing provider credentials and does not open an interactive login.
@@ -264,7 +276,7 @@ Cursor uses a private snapshot of its CLI configuration under the relay state di
 
 DSH receives private files containing the relay's bundled native and optional model patches. They are passed immediately after `--profile headless`, before application flags. User profiles are not edited; `DSH_PERMISSION_MODE` is set only in the child environment. Native configuration files are removed after confirmed process cleanup, including startup failure, cancellation and timeout; they are retained if cleanup cannot be confirmed. Preparation errors fail structurally without an unrestricted retry. A process crash may leave private directories behind; remove them only after confirming no worker still uses them.
 
-Grok, Cursor, OpenCode, DSH and Claude Code emit one bounded stderr diagnostic per execution describing policy limits. Diagnostics contain no credentials or task text. External MCP services are not isolated by these settings. Custom executables/wrappers must honor native arguments and configuration; overriding the executable is not proof of enforcement.
+Cursor, OpenCode, DSH and Claude Code emit one bounded stderr diagnostic per execution describing policy limits. Diagnostics contain no credentials or task text. External MCP services are not isolated by these settings. Custom executables/wrappers must honor native arguments and configuration; overriding the executable is not proof of enforcement.
 
 The policy targets macOS, Linux and Windows through each provider's supported backends; launcher support does not prove sandbox availability. Hermetic tests verify configuration and refusal behavior, not real CLI isolation. Real CLI checks remain opt-in: use a disposable workspace to check internal/external writes, shell networking, web tools and resumed sessions, recording the OS, CLI version and observed result. Unrun platforms and capabilities remain unverified.
 

@@ -84,8 +84,9 @@ export type HeadlessAdapter<I extends DelegateInput, R extends RelayResult> = {
   command(input: I, record?: SessionRecord): { command: string; args: string[] };
   presetSessionId?(input: I, record?: SessionRecord): string | undefined;
   decode(event: unknown): HeadlessEvent;
+  stderrFailure?(tail: string): RelayFailure | undefined;
   complete(state: Readonly<HeadlessState<R>>, exit: HeadlessExit): R;
-  gracefulStop: { signal: NodeJS.Signals; graceMs: number };
+  gracefulStop: { signal: NodeJS.Signals; graceMs: number; waitForExit?: boolean };
   createSummarizer(limitBytes: number): ProviderSummarizer<R>;
 };
 

@@ -20,7 +20,7 @@ The calling agent owns planning, delegation, review, and integration. External a
 
 Delegate only to an agent the user explicitly mentions (Grok, Cursor, OpenCode, DSH, Codex, or Claude Code). If the user does not name an agent, the calling agent performs the task itself; do not infer delegation from task type or complexity.
 
-- Use \`grok_delegate\` for Grok implementation tasks.
+- Use \`grok_delegate\` for Grok implementation tasks through headless streaming JSON. Pass the returned UUID \`sessionId\` with the same \`cwd\` to resume. Unexpected permission diagnostics return UNEXPECTED_PERMISSION; review the failure before resuming. Cancellation waits for Grok's graceful shutdown to reap its tool processes.
 - Use \`cursor_delegate\` for Cursor implementation tasks or focused analysis in \`ask\` mode; an optional \`model\` selects the startup model.
 - Use \`opencode_delegate\` for OpenCode implementation work. Optional \`model\`, \`effort\`, and \`agent\` change the live session configuration; omitted fields keep OpenCode's restored or default state.
 - Use \`dsh_delegate\` for DSH implementation work through its headless profile. Optional \`model\` and \`reasoningEffort\` add or change the model route; omitted fields preserve the restored or default route. Pass the returned \`sessionId\` with the same \`cwd\` to resume; the relay does not load or recreate a missing session.

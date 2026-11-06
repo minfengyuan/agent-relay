@@ -31,6 +31,8 @@ export class HeadlessRunner<I extends DelegateInput, R extends RelayResult> {
     let reading: Promise<void> | undefined;
     let output: Readable | undefined;
     let stopped = false;
+    let stderrFailure: RelayFailure | undefined;
+    let exited: Promise<HeadlessExit> | undefined;
     let lastProgress = 0;
     let progressPending = false;
     let terminalReceived!: () => void;
@@ -54,6 +56,7 @@ export class HeadlessRunner<I extends DelegateInput, R extends RelayResult> {
       displayName: this.adapter.displayName,
       failureCode: this.adapter.failureCode,
       partial,
+      onStderr: (tail) => { stderrFailure ??= this.adapter.stderrFailure?.(tail); },
       prepare: async (env, record, runHelper) => {
         if (input.sessionId !== undefined && !input.sessionId.trim()) {
           throw new RelayFailure("INVALID_INPUT", "A resumed session ID must be nonempty");
@@ -77,7 +80,8 @@ export class HeadlessRunner<I extends DelegateInput, R extends RelayResult> {
       gracefulCancel: async (ctx) => {
         if (ctx.child.exitCode !== null || ctx.child.signalCode !== null) return;
         ctx.child.kill(this.adapter.gracefulStop.signal);
-        await terminal;
+        if (this.adapter.gracefulStop.waitForExit) await exited;
+        else await terminal;
       },
       dispose: async () => {
         stopped = true;
@@ -87,9 +91,10 @@ export class HeadlessRunner<I extends DelegateInput, R extends RelayResult> {
       drive: async (ctx) => {
         output = ctx.child.stdout;
         const exit = new Promise<HeadlessExit>((resolve, reject) => {
-          ctx.child.once("exit", (code, signal) => resolve({ code, signal }));
+          ctx.child.once("close", (code, signal) => resolve({ code, signal }));
           ctx.child.once("error", reject);
         });
+        exited = exit;
         void exit.catch(() => undefined);
         ctx.child.stdin.on("error", (error: Error) => ctx.abort(new RelayFailure(this.adapter.failureCode, error.message)));
         reading = (async () => {
@@ -163,11 +168,12 @@ export class HeadlessRunner<I extends DelegateInput, R extends RelayResult> {
           });
           await ctx.run(written);
         }
-        const [, exited] = await ctx.run(Promise.all([reading, exit]));
+        const [, processExit] = await ctx.run(Promise.all([reading, exit]));
+        if (stderrFailure) throw stderrFailure;
         if (state.permissionDenied !== undefined) {
           throw new RelayFailure("PERMISSION_REQUIRED", state.permissionDenied);
         }
-        const result = this.adapter.complete(state, exited);
+        const result = this.adapter.complete(state, processExit);
         if (!state.final?.ok || state.error !== undefined) {
           throw new RelayFailure(this.adapter.failureCode, state.error ?? state.final?.error ?? "Worker did not complete successfully");
         }

@@ -59,9 +59,14 @@ When changing an existing adapter, walk through the contract in this order:
 ### Grok
 
 - Default command comes from `RelayConfig.command` (`grok` by default) with relay-owned safety/noninteractive arguments.
-- Keep `--sandbox workspace`, disabled web search/fetch and explicit web deny rules. Workspace permits Grok state/temp writes and child networking; emit the bounded policy warning without claiming complete network isolation.
-- Authentication prefers `xai.api_key` only when `XAI_API_KEY` exists and the method is advertised; otherwise it uses advertised `cached_token`.
-- A permission request is unexpected because the CLI is launched with always-approve semantics; fail rather than inventing an interactive flow.
+- Use `HeadlessAdapter` with `--output-format streaming-json`, not ACP. Each headless run owns its daemon even with leader mode enabled; do not pass ACP's `--no-leader`.
+- Keep `--sandbox workspace`, disabled web search/fetch, explicit web deny rules, and `--always-approve`. Add `--disallowed-tools ask_user_question` and `--no-wait-for-background`. Workspace permits Grok state/temp writes and child networking; do not claim complete network isolation.
+- Write tasks verbatim to private `0600` prompt files and use `--prompt-file`, with stdin ignored.
+- Generate a UUID for new sessions and pass `-s`; persist it on the first event, including unknown types. Resume only a relay-recorded UUID with `-r` and the same `--cwd`. Keep the root `sessions/` namespace for ACP compatibility; reject titles before spawn.
+- Use existing CLI credentials. `error.message` starting with `Not signed in` maps to `AUTH_UNAVAILABLE`; containing `No saved copy of session` maps to `UNKNOWN_SESSION`.
+- Decode `text.data` and `end.stopReason` (normalize `EndTurn` to `end_turn`). Verify `end.sessionId` matches the preset/recorded UUID. Ignore `available_commands`, `thought`, and `usage`; tool events drive progress only.
+- Success requires an `end` with a non-cancelled stop reason, exit `0`, and no error event. stderr `permission required:` is a defensive `UNEXPECTED_PERMISSION` failure even on exit `0`.
+- Cancel with root SIGTERM and at least 12 seconds of grace, waiting for exit after the terminal event before tree termination. Tool shells run in separate groups; only Grok's graceful shutdown can reap them. Force-killing the original group cannot guarantee cleanup of escaped groups.
 - No provider-specific structured summary is currently returned beyond the common text/session result.
 
 ### Cursor

@@ -49,7 +49,8 @@ Use the narrowest test file that owns the behavior:
 - `config.test.ts` — environment parsing and defaults.
 - `store.test.ts` — session persistence, validation, and state I/O.
 - `workspace-lock.test.ts` — per-`cwd` serialization/lock behavior.
-- `runner.test.ts` — generic Grok/common ACP runner behavior.
+- `runner.test.ts` — generic ACP runner behavior through `TestAcpRunner`.
+- `grok-runner.test.ts` — Grok headless transcript replay, UUID sessions, stderr permissions, and graceful shutdown.
 - `cursor-runner.test.ts` — Cursor adapter behavior.
 - `opencode-runner.test.ts` — OpenCode adapter behavior.
 - `dsh-runner.test.ts` — DSH adapter behavior.

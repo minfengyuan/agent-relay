@@ -6,10 +6,14 @@ import { beginRunnerShutdown, CodexRunner } from "../../dist/runner.js";
 import { SessionStore } from "../../dist/store.js";
 
 const [stateDir, log, mode] = process.argv.slice(2);
+// Generic ACP carrier: OpenCode still runs on AcpRunner, Grok is headless.
+const workerArgs = [join(dirname(fileURLToPath(import.meta.url)), "cli-worker.mjs"), log,
+  mode === "writer" || mode === "unconfirmed" ? "writer" : "hang"];
 const config = {
   command: process.execPath,
-  commandArgs: [join(dirname(fileURLToPath(import.meta.url)), "cli-worker.mjs"), log,
-    mode === "writer" || mode === "unconfirmed" ? "writer" : "hang"],
+  commandArgs: workerArgs,
+  opencodeCommand: process.execPath,
+  opencodeCommandArgs: workerArgs,
   stateDir, phaseTimeoutMs: 2000, totalTimeoutMs: 15000,
   cancelGraceMs: 100, termGraceMs: 100, killConfirmMs: 5000,
   textLimitBytes: 262144, stderrLimitBytes: 65536, progressIntervalMs: 1,

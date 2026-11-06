@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { cleanupAllChildren, GrokRunner } from "../src/runner.js";
+import { cleanupAllChildren } from "../src/runner.js";
 import { SessionStore } from "../src/store.js";
 import { RelayFailure } from "../src/types.js";
 import { TestAcpRunner, backpressureFixture, baseConfig as config, tempDir as makeTempDir, useRunnerCleanup, waitForLog } from "./helpers.js";
@@ -11,7 +11,7 @@ vi.setConfig({ testTimeout: 15_000 });
 useRunnerCleanup(dirs);
 const tempDir = () => makeTempDir(dirs);
 
-describe("GrokRunner", () => {
+describe("TestAcpRunner", () => {
   it("rejects a pre-aborted request before acquiring a lock or spawning", async () => {
     const state = await tempDir();
     const cwd = await tempDir();
@@ -71,34 +71,6 @@ describe("GrokRunner", () => {
     vi.stubEnv("AGENT_RELAY_DELEGATED", "1");
     await expect(new TestAcpRunner(config(state), new SessionStore(state)).delegate({ task: "one", cwd }))
       .rejects.toMatchObject({ code: "NESTED_DELEGATION" });
-  });
-
-  it("prefers API-key authentication when present", async () => {
-    vi.stubEnv("XAI_API_KEY", "test-key");
-    const state = await tempDir();
-    const cwd = await tempDir();
-    const log = join(state, "auth.log");
-    vi.stubEnv("FAKE_ACP_LOG", log);
-    await new GrokRunner(config(state), new SessionStore(state)).delegate({ task: "one", cwd });
-    expect(await readFile(log, "utf8")).toContain("auth:xai.api_key");
-  });
-
-  it("reports missing auth, missing load capability, and load failures without replacement sessions", async () => {
-    vi.stubEnv("XAI_API_KEY", "");
-    const state = await tempDir();
-    const cwd = await tempDir();
-    vi.stubEnv("FAKE_ACP_MODE", "no-auth");
-    await expect(new GrokRunner(config(state), new SessionStore(state)).delegate({ task: "one", cwd }))
-      .rejects.toMatchObject({ code: "AUTH_UNAVAILABLE" });
-
-    vi.stubEnv("FAKE_ACP_MODE", "normal");
-    const created = await new GrokRunner(config(state), new SessionStore(state)).delegate({ task: "one", cwd });
-    vi.stubEnv("FAKE_ACP_MODE", "no-load");
-    await expect(new GrokRunner(config(state), new SessionStore(state)).delegate({ task: "two", cwd, sessionId: created.sessionId as string }))
-      .rejects.toMatchObject({ code: "LOAD_UNSUPPORTED" });
-    vi.stubEnv("FAKE_ACP_MODE", "load-fail");
-    await expect(new GrokRunner(config(state), new SessionStore(state)).delegate({ task: "two", cwd, sessionId: created.sessionId as string }))
-      .rejects.toMatchObject({ code: "ACP_FAILURE" });
   });
 
   it("preserves partial output, caps text, and reports progress", async () => {
@@ -324,12 +296,4 @@ describe("GrokRunner", () => {
     await release.release();
   });
 
-  it("rejects an unexpected permission request and keeps the session id", async () => {
-    vi.stubEnv("XAI_API_KEY", "");
-    vi.stubEnv("FAKE_ACP_MODE", "permission");
-    const state = await tempDir();
-    const cwd = await tempDir();
-    await expect(new GrokRunner(config(state), new SessionStore(state)).delegate({ task: "permission", cwd }))
-      .rejects.toMatchObject({ code: "UNEXPECTED_PERMISSION", partial: { sessionId: "fake-session-1" } });
-  });
 });

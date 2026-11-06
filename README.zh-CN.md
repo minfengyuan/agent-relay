@@ -159,6 +159,18 @@ Grok / Cursor / OpenCode / DSH / Codex / Claude Code 在本地工作
 
 并行处理独立任务时使用不同 worktree。同一个解析后的工作目录只允许一个活跃任务；重叠调用返回 `WORKSPACE_BUSY`。
 
+### Grok
+
+Grok 使用 headless 流式 JSON（`--output-format streaming-json`），沿用 CLI 已有认证。即使用户配置启用了 leader mode，每次 headless 运行仍启动自己的 daemon；Relay 不连接共享 leader，也不再传 ACP 专用的 `--no-leader`。
+
+Relay 保留 `--sandbox workspace`、禁用内置 Web search/fetch、显式拒绝 `WebFetch`/`WebSearch`，以及 `--always-approve`；另传 `--disallowed-tools ask_user_question` 和 `--no-wait-for-background`，支持无人值守执行。Grok 状态目录和临时目录仍可写，shell 网络仍可用；这些设置不隔离外部 MCP 服务。
+
+任务原样写入私有 `0600` 文件，通过 `--prompt-file` 传入，任务文本不放入 argv。新会话由 Relay 生成 UUID，以 `-s` 传入，首个事件到达后持久化。恢复只传 Relay 已记录的 UUID，以 `-r` 和相同解析后的 `--cwd` 启动，避免按标题匹配。旧 ACP UUID 沿用根 `sessions/` 命名空间。Provider 中不存在的会话返回 `UNKNOWN_SESSION`，不创建替代会话；`Not signed in` 错误映射为 `AUTH_UNAVAILABLE`。
+
+结果只保留公共字段：文本由 `text` 事件拼接，`stopReason` 来自 `end`。工具事件只提供进度，不返回工具或 usage 摘要。成功必须同时满足：存在 `end`，停止原因不是 `cancelled`，退出码为 `0`，且没有 error 事件。作为防御，stderr 出现 `permission required:` 时返回 `UNEXPECTED_PERMISSION`，即使 CLI 退出码为 `0`。
+
+取消时先发送 SIGTERM，给 Grok 至少 12 秒退出宽限，再终止进程树。Grok 可能在 daemon 退出前就发出 `end{cancelled}`，所以 Relay 在宽限内继续等待进程退出。Grok 工具 shell 使用独立进程组，只有 Grok 自身的优雅关闭会回收这些子进程；强杀原进程组无法保证回收已脱离的组。DSH 的 detached 工具进程组也有相同限制。恢复会话前必须等调用结束。
+
 ### OpenCode
 
 Relay 对 V1、V2 均使用 `opencode acp`，通过子进程工作目录和 ACP 会话请求传递绝对路径 `cwd`，不传递 V2 已拒绝的 `--cwd` 参数。可用 `AGENT_RELAY_OPENCODE_COMMAND` 指定其他可执行文件。委派前先执行 `opencode auth login`；Relay 使用已有认证，不启动交互登录。
@@ -264,7 +276,7 @@ Cursor 使用 relay 状态目录下的私有 CLI 配置快照。原有 CLI 设�
 
 DSH 接收包含 relay 随包权限 patch 和可选模型 patch 的私有文件，它们紧跟 `--profile headless`，位于应用参数之前。不修改用户 profile；`DSH_PERMISSION_MODE` 仅在子进程环境中设置。原生配置文件在确认进程清理后删除，包括启动失败、取消和超时；无法确认清理时保留文件。配置准备失败会返回结构化错误，不会无约束重试。进程崩溃可能遗留私有目录，只有确认没有工作进程使用时才能删除。
 
-Grok、Cursor、OpenCode、DSH 和 Claude Code 每次执行向 stderr 输出一次有长度限制的策略诊断。诊断不包含凭据或任务文本。上述设置不隔离外部 MCP 服务。自定义可执行文件/包装器必须遵守原生参数与配置；替换可执行文件不代表限制已经生效。
+Cursor、OpenCode、DSH 和 Claude Code 每次执行向 stderr 输出一次有长度限制的策略诊断。诊断不包含凭据或任务文本。上述设置不隔离外部 MCP 服务。自定义可执行文件/包装器必须遵守原生参数与配置；替换可执行文件不代表限制已经生效。
 
 策略通过各 provider 自身支持的后端面向 macOS、Linux 和 Windows；relay 能启动 CLI 不代表该平台具备可用沙箱。隔离测试验证配置和拒绝行为，不证明真实 CLI 隔离能力。真实 CLI 验收仍需显式启用：在临时工作区检查内部/外部写入、shell 联网、Web 工具与恢复会话，记录 OS、CLI 版本及实际结果。未执行的平台与能力均标记为未验证。
 

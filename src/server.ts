@@ -257,7 +257,7 @@ export function createRelayServer(config: RelayConfig): McpServer {
   registerDelegateTool(server, {
     name: "grok_delegate",
     title: "Delegate a task to Grok",
-    description: "Runs one Grok ACP prompt with workspace sandboxing and built-in web tools disabled; optionally resumes a saved session. Child network access and Grok state-directory writes remain allowed.",
+    description: "Runs one Grok headless turn with workspace sandboxing and built-in web tools disabled; optionally resumes a saved UUID. Child network access and Grok state-directory writes remain allowed. Unexpected permission diagnostics fail with UNEXPECTED_PERMISSION.",
     inputSchema: grokInputSchema,
     outputSchema,
     run: (input: z.infer<typeof grokInputSchema>, cwd, signal, progress) => runner.delegate({

@@ -34,7 +34,7 @@ function positiveInt(value: string | undefined, fallback: number): number {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayConfig {
   return {
     command: env.AGENT_RELAY_GROK_COMMAND ?? "grok",
-    commandArgs: ["--no-auto-update", "--sandbox", "workspace", "--disable-web-search", "--deny", "WebFetch", "--deny", "WebSearch", "agent", "--always-approve", "--no-leader", "stdio"],
+    commandArgs: ["--no-auto-update", "--sandbox", "workspace", "--disable-web-search", "--deny", "WebFetch", "--deny", "WebSearch", "--always-approve", "--disallowed-tools", "ask_user_question", "--no-wait-for-background", "--output-format", "streaming-json"],
     ...(env.AGENT_RELAY_CURSOR_COMMAND?.trim() ? { cursorCommand: env.AGENT_RELAY_CURSOR_COMMAND.trim() } : {}),
     opencodeCommand: env.AGENT_RELAY_OPENCODE_COMMAND?.trim() || "opencode",
     dshCommand: env.AGENT_RELAY_DSH_COMMAND?.trim() || "dsh",

@@ -8,7 +8,7 @@ import { cleanupAllChildren, ClaudeRunner, CodexRunner } from "../src/runner.js"
 import { createRelayServer } from "../src/server.js";
 import { RelayFailure } from "../src/types.js";
 import { SessionStore } from "../src/store.js";
-import { claudeFixture, clearDelegatedEnv, codexFixture, dshFixture, grokFixture, opencodeFixture, waitForLog } from "./helpers.js";
+import { claudeFixture, clearDelegatedEnv, codexFixture, dshFixture, grokHeadlessFixture, opencodeFixture, waitForLog } from "./helpers.js";
 
 const dirs: string[] = [];
 beforeEach(() => {
@@ -61,7 +61,7 @@ describe("MCP server", () => {
   it.each(["local-tool-client", "custom-orchestrator"])("accepts %s as the calling MCP client", async (name) => {
     const { server, clientTransport, request, init } = await harness({
       command: process.execPath,
-      commandArgs: [grokFixture],
+      commandArgs: [grokHeadlessFixture],
     }, { name, version: "1" });
     try {
       expect(init).toHaveProperty("result.serverInfo.name", "agent-relay");
@@ -71,7 +71,7 @@ describe("MCP server", () => {
         name: "grok_delegate", arguments: { task: "hello", cwd: process.cwd() },
       }) as { result?: { isError?: boolean; content?: Array<{ text?: string }>; structuredContent?: unknown } };
       expect(response.result?.isError).not.toBe(true);
-      expect(response.result?.structuredContent).toMatchObject({ sessionId: "fake-session-1" });
+      expect(response.result?.structuredContent).toMatchObject({ sessionId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
       expect(JSON.parse(response.result?.content?.[0]?.text ?? "null")).toEqual(response.result?.structuredContent);
     } finally {
       await clientTransport.close();
@@ -386,12 +386,12 @@ describe("MCP server", () => {
   });
 
   it.runIf(process.platform === "win32")("returns a structured cleanup failure and retains the original partial result", async () => {
-    vi.stubEnv("FAKE_ACP_MODE", "exit");
+    vi.stubEnv("FAKE_GROK_NO_EVENTS", "1");
     const cwd = await mkdtemp(join(tmpdir(), "relay-server-cwd-"));
     dirs.push(cwd);
     const { server, clientTransport, request } = await harness({
       command: process.execPath,
-      commandArgs: [grokFixture],
+      commandArgs: [grokHeadlessFixture],
     });
     const response = await request(6, "tools/call", {
       name: "grok_delegate",
