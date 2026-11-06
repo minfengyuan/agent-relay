@@ -1,22 +1,12 @@
-import * as acp from "@agentclientprotocol/sdk";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { RelayConfig } from "../config.js";
-import type { SessionStore } from "../store.js";
+import { resolveCwd, type SessionStore } from "../store.js";
 import { RelayFailure, type DshDelegateInput, type DshRelayResult } from "../types.js";
-import { AcpRunner } from "../runner/acp-runner.js";
-import {
-  abortFailure,
-  cancelledPermission,
-  configSelectValues,
-  hasCloseCapability,
-  hasResumeCapability,
-} from "../runner/helpers.js";
-import { boundedString, withTimeout } from "../runner/limits.js";
+import { HeadlessRunner } from "../runner/headless-runner.js";
 import { StandardSummaries } from "../runner/summaries.js";
-import type { ProgressReporter, ProviderAdapter } from "../runner/types.js";
+import type { HeadlessAdapter, HeadlessEvent, ProgressReporter } from "../runner/types.js";
 import { resolveWindowsDshLauncher } from "./dsh-windows-command.js";
-import { prepareNativeConfig } from "./native-config.js";
 import { dshPolicyPatch } from "./dsh-policy.js";
 
 export { resolveWindowsDshLauncher };
@@ -26,122 +16,160 @@ export function dshSpawnSpec(
   env: NodeJS.ProcessEnv = process.env,
 ): { command: string; args: string[] } {
   const command = config.dshCommand?.trim() || "dsh";
-  const args = config.dshCommandArgs ?? ["--profile", "acp"];
+  const args = config.dshCommandArgs ?? ["--profile", "headless"];
   if (process.platform !== "win32") return { command, args };
   const resolved = resolveWindowsDshLauncher(command, env);
   return { command: resolved.command, args: [...resolved.prefixArgs, ...args] };
 }
 
-function dshAdapter(config: RelayConfig): ProviderAdapter<DshDelegateInput, DshRelayResult> {
+function childEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const child: NodeJS.ProcessEnv = { ...env, DSH_PERMISSION_MODE: "workspace-write" };
+  if (child.DEEPSEEK_API_KEY === "") delete child.DEEPSEEK_API_KEY;
+  return child;
+}
+
+function object(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : {};
+}
+
+function string(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function defaultProvider(stdout: string): string {
+  const lines = stdout.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^\s*-\s+id:\s*["']?agent-default-model["']?\s*$/.test(line));
+  if (start >= 0) {
+    for (const line of lines.slice(start + 1)) {
+      if (/^\s*-\s+id:/.test(line)) break;
+      const match = /^\s+provider:\s*(?:"([^"]+)"|'([^']+)'|([a-zA-Z0-9_.:/-]+))\s*(?:#.*)?$/.exec(line);
+      const provider = match?.[1] ?? match?.[2] ?? match?.[3];
+      if (provider) return provider;
+    }
+  }
+  throw new RelayFailure("INVALID_CONFIG", "Cannot read agent-default-model.provider from DSH --dump-config");
+}
+
+export function dshAdapter(config: RelayConfig): HeadlessAdapter<DshDelegateInput, DshRelayResult> {
   return {
-    provider: "dsh",
     displayName: "DSH",
-    command() {
-      return dshSpawnSpec(config);
-    },
-    prepareSpawn: (_input, env) => prepareNativeConfig(config.stateDir, "dsh", async (directory) => {
-      const patchPath = join(directory, "permissions.patch.yml");
-      await writeFile(patchPath, dshPolicyPatch, { mode: 0o600 });
-      return {
-        env: { ...env, DSH_PERMISSION_MODE: "workspace-write" },
-        extraArgs: ["--patch", patchPath],
-      };
+    failureCode: "ACP_FAILURE",
+    spawnEnv: childEnvironment,
+    command: () => dshSpawnSpec({
+      ...config,
+      dshCommandArgs: [...(config.dshCommandArgs ?? []), "--profile", "headless"],
     }),
-    permissionWarning: (input) => input.sessionId
-      ? "DSH resumed-session permissions are not unified: saved sandbox mode is preserved and cannot be verified through ACP. Built-in web tools are disabled, but shell network access remains available."
-      : "DSH defaults to workspace-write and disables built-in web tools; its file sandbox does not restrict shell network access. External MCP services still apply.",
-    authenticate() {
-      return undefined;
-    },
-    capabilities: {},
-    prompt: (task) => `This is a noninteractive delegated task. Do not ask the user questions. Resolve minor ambiguity conservatively. If a material decision is unresolved, stop and report it.\n\n${task}`,
-    sessionMetadata: () => ({}),
-    persistNewSessionBeforeConfigure: true,
-    validateInitialized(initialized) {
-      if (!hasCloseCapability(initialized.agentCapabilities)) {
-        throw new RelayFailure(
-          "SESSION_CLOSE_UNSUPPORTED",
-          "DSH did not advertise session close capability",
-        );
-      }
-    },
-    existingSession(initialized) {
-      if (!hasResumeCapability(initialized.agentCapabilities)) {
-        throw new RelayFailure("RESUME_UNSUPPORTED", "DSH did not advertise session resume capability");
-      }
-      return "resume";
-    },
-    createSummarizer: (limitBytes) => new StandardSummaries(limitBytes, "dsh"),
-    handlePermission(params, rt) {
-      if (params.sessionId !== rt.sessionId || rt.signal.aborted || rt.hasFailure()) {
-        return cancelledPermission();
-      }
-      rt.markRequested();
-      const reject = params.options.find((option) => option.kind === "reject_once");
-      const permissionLabel = boundedString(params.toolCall.title ?? params.toolCall.toolCallId, 256);
-      const permissionFailure = new RelayFailure(
-        "PERMISSION_REQUIRED",
-        reject
-          ? `DSH permission was rejected: ${permissionLabel}`
-          : `DSH requested permission without a reject_once option: ${permissionLabel}`,
-        rt.partial(),
-      );
-      rt.setFailure(permissionFailure);
-      setImmediate(() => rt.abort(permissionFailure));
-      return reject
-        ? { outcome: { outcome: "selected" as const, optionId: reject.optionId } }
-        : cancelledPermission();
-    },
-    async configureSession(ctx, sessionId, input, extras, signal) {
-      const requested = [
-        ["model", input.model],
-        ["reasoning_effort", input.reasoningEffort],
-      ] as const;
-      let options = [...(extras.configOptions ?? [])];
-      for (const [id, value] of requested) {
-        if (value === undefined) continue;
-        if (signal?.aborted) abortFailure(signal);
-        const option = options.find((entry) => entry.id === id);
-        if (!option) {
-          throw new RelayFailure("CONFIG_UNSUPPORTED", `DSH did not advertise the ${id} session option`);
+    prepare: async (input, record, directory, context) => {
+      const env = childEnvironment(context.env);
+      const permissions = join(directory, "permissions.patch.yml");
+      await writeFile(permissions, dshPolicyPatch, { mode: 0o600 });
+      const extraArgs = ["--patch", permissions];
+      if (input.model !== undefined || input.reasoningEffort !== undefined) {
+        const invocation = dshSpawnSpec({
+          ...config,
+          dshCommandArgs: [...(config.dshCommandArgs ?? []), "--profile", "headless"],
+        }, env);
+        let stdout: string;
+        try {
+          const result = await context.runHelper({
+            ...invocation, args: [...invocation.args, "--patch", permissions, "--dump-config"],
+            env, timeoutMs: config.phaseTimeoutMs,
+          });
+          if (result.truncated) throw new RelayFailure("INVALID_CONFIG", "DSH --dump-config output was truncated");
+          stdout = result.stdout;
+        } catch (error) {
+          if (error instanceof RelayFailure && error.code === "TIMEOUT") {
+            throw new RelayFailure("CONFIG_TIMEOUT", "DSH --dump-config timed out");
+          }
+          throw error;
         }
-        if (!configSelectValues(option).includes(value)) {
-          throw new RelayFailure("INVALID_CONFIG", `DSH ${id} value is not available`);
+        const modelPatch = join(directory, "model.patch.yml");
+        const route = {
+          provider: defaultProvider(stdout),
+          ...(input.model === undefined ? {} : { model: input.model }),
+          ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+        };
+        await writeFile(modelPatch, JSON.stringify([{ id: "agent-default-model", config: route }]), { mode: 0o600 });
+        extraArgs.push("--patch", modelPatch);
+      }
+      extraArgs.push("--json", "--permission-mode", "workspace-write", "--approval-policy", "never");
+      if (record) extraArgs.push("--session-id", record.sessionId);
+      extraArgs.push("-");
+      return { env, extraArgs, stdin: { write: input.task } };
+    },
+    decode(raw): HeadlessEvent {
+      const event = object(raw);
+      const session = typeof event.sessionId === "string" ? { sessionId: event.sessionId } : {};
+      switch (event.type) {
+        case "session":
+          return { type: "session", id: string(event.sessionId), ...session };
+        case "text":
+          return { type: "text", text: string(event.text), ...session };
+        case "tool_call":
+          return { type: "toolCall", id: string(event.callId), title: string(event.tool), ...session };
+        case "tool_result": {
+          const error = object(event.error);
+          if (error.code === "FS_SANDBOX_DENIED" || error.code === "AUTO_REVIEW_DENIED") {
+            return {
+              type: "permissionDenied", id: string(event.callId),
+              title: `DSH ${error.code}: ${string(event.result) || string(event.callId)}`, ...session,
+            };
+          }
+          return {
+            type: "toolResult", id: string(event.callId),
+            status: event.status === "completed" ? "completed" : event.status === "error" ? "failed" : string(event.status),
+            ...session,
+          };
         }
-        const response = await withTimeout(ctx.request(acp.methods.agent.session.setConfigOption, {
-          sessionId,
-          configId: id,
-          value,
-        }), config.phaseTimeoutMs, "CONFIG_TIMEOUT", `DSH ${id} configuration timed out`);
-        if (signal?.aborted) abortFailure(signal);
-        options = [...response.configOptions];
+        case "final": {
+          const reason = object(event.reason);
+          const error = object(reason.error);
+          const errorCode = typeof error.code === "string" ? error.code : "";
+          const errorMessage = typeof error.message === "string" ? error.message : "";
+          return {
+            type: "final", ok: reason.kind === "completed", stopReason: reason.kind === "completed" ? "end_turn" : string(reason.kind),
+            text: string(event.text), ...session,
+            ...(errorCode ? { errorCode } : {}),
+            ...(errorCode || errorMessage
+              ? { error: [errorCode, errorMessage].filter(Boolean).join(": ") }
+              : {}),
+          };
+        }
+        case "error":
+          return { type: "error", message: string(event.message), ...session };
+        default:
+          return { type: "ignore", ...session };
       }
     },
-    async finalizeSession(ctx, sessionId) {
-      try {
-        await withTimeout(
-          ctx.request(acp.methods.agent.session.close, { sessionId }),
-          config.phaseTimeoutMs,
-          "SESSION_CLOSE_TIMEOUT",
-          "DSH session close timed out",
-        );
-      } catch (error) {
-        if (error instanceof RelayFailure) throw error;
-        throw new RelayFailure(
-          "SESSION_CLOSE_FAILED",
-          `DSH session close failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
+    complete(state, exit) {
+      if (state.final?.errorCode === "MISSING_CREDENTIAL") {
+        throw new RelayFailure("AUTH_UNAVAILABLE", state.final.error ?? "DSH credentials are unavailable");
       }
+      if (!state.final && state.error) {
+        const code = state.error.includes("does not exist") ? "UNKNOWN_SESSION"
+          : state.error.includes("was recorded in") ? "CWD_MISMATCH" : "ACP_FAILURE";
+        throw new RelayFailure(code, state.error);
+      }
+      if (exit.code !== 0 || !state.final?.ok) {
+        throw new RelayFailure("ACP_FAILURE", state.final?.error ?? state.error ?? `DSH exited with ${exit.code ?? exit.signal} without a completed final event`);
+      }
+      return {
+        provider: "dsh", sessionId: state.sessionId, text: state.text,
+        stopReason: state.final.stopReason, truncated: state.truncated,
+      };
     },
+    gracefulStop: { signal: "SIGTERM", graceMs: config.cancelGraceMs },
+    createSummarizer: (limit) => new StandardSummaries(limit, "dsh"),
   };
 }
 
-export class DshRunner extends AcpRunner<DshDelegateInput, DshRelayResult> {
+export class DshRunner extends HeadlessRunner<DshDelegateInput, DshRelayResult> {
   constructor(config: RelayConfig, store: SessionStore) {
     super(config, store, dshAdapter(config));
   }
 
-  override delegate(input: DshDelegateInput, signal?: AbortSignal, reportProgress?: ProgressReporter): Promise<DshRelayResult> {
-    return super.delegate(input, signal, reportProgress);
+  override async delegate(input: DshDelegateInput, signal?: AbortSignal, progress?: ProgressReporter): Promise<DshRelayResult> {
+    return super.delegate({ ...input, cwd: await resolveCwd(input.cwd) }, signal, progress);
   }
 }

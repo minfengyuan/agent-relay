@@ -33,7 +33,7 @@ async function assertNoActiveLease(state: string, cwd: string): Promise<void> {
   await lease.release();
 }
 
-describeReal("real DSH ACP smoke", () => {
+describeReal("real DSH headless smoke", () => {
   it("creates, resumes across processes, and edits a disposable workspace", async () => {
     if (process.env.AGENT_RELAY_DELEGATED === "1") {
       throw new Error("Real DSH smoke is unavailable inside a delegated worker (NESTED_DELEGATION); run it from the parent environment");
@@ -41,7 +41,7 @@ describeReal("real DSH ACP smoke", () => {
     const loaded = loadConfig();
     const version = dshSpawnSpec({ ...loaded, dshCommandArgs: ["--version"] });
     await execFileAsync(version.command, version.args, { timeout: 15_000 });
-    const help = dshSpawnSpec({ ...loaded, dshCommandArgs: ["--profile", "acp", "--help"] });
+    const help = dshSpawnSpec({ ...loaded, dshCommandArgs: ["--profile", "headless", "--help"] });
     await execFileAsync(help.command, help.args, { timeout: 15_000 });
 
     const root = await mkdtemp(join(tmpdir(), "dsh-real-"));

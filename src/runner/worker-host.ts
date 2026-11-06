@@ -25,9 +25,16 @@ export type WorkerOptions = {
   displayName: string;
   failureCode: RelayErrorCode;
   invocation(record?: SessionRecord): { command: string; args: string[] };
-  prepare?(env: NodeJS.ProcessEnv, record?: SessionRecord): Promise<PreparedSpawn>;
+  prepare?(env: NodeJS.ProcessEnv, record: SessionRecord | undefined, runHelper: PreparationHelper): Promise<PreparedSpawn>;
   partial?(record: SessionRecord | undefined): RelayResultPartial;
 };
+
+export type PreparationHelper = (options: {
+  command: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  timeoutMs: number;
+}) => Promise<HelperResult>;
 
 export type WorkerDriver<T> = WorkerOptions & {
   drive(ctx: WorkerContext): Promise<T>;
@@ -84,7 +91,35 @@ export class WorkerHost {
       if (abort.signal.aborted) throw abort.signal.reason;
       record = options.sessionId ? await this.store.read(options.sessionId, options.cwd) : undefined;
       if (abort.signal.aborted) throw abort.signal.reason;
-      prepared = await options.prepare?.({ ...process.env, AGENT_RELAY_DELEGATED: "1" }, record);
+      const runHelper: PreparationHelper = async (helper) => {
+        const borrowedStore = new Proxy(this.store, {
+          get: (target, key) => key === "acquire" ? async () => ({
+            ...lease!,
+            release: () => lease!.markSpawning(),
+          }) : Reflect.get(target, key, target),
+        });
+        try {
+          return await new WorkerHost({ ...this.config, totalTimeoutMs: helper.timeoutMs }, borrowedStore).runHelper({
+            cwd: options.cwd, displayName: options.displayName, failureCode: options.failureCode,
+            invocation: () => ({ command: helper.command, args: helper.args }),
+            prepare: async () => ({ env: helper.env, dispose: async () => {} }),
+          }, abort.signal);
+        } catch (error) {
+          if (error instanceof RelayFailure && error.code === "PROCESS_CLEANUP_FAILED") {
+            worker.state = "created";
+          }
+          if (error instanceof RelayFailure
+            && (error.code === "PROCESS_CLEANUP_FAILED"
+              || error.code === "LOCK_IO"
+              || error.code === "LOCK_OWNERSHIP_LOST")) {
+            throw error;
+          }
+          const outerFailure = abort.signal.aborted ? abort.signal.reason : undefined;
+          if (outerFailure instanceof RelayFailure) throw outerFailure;
+          throw error;
+        }
+      };
+      prepared = await options.prepare?.({ ...process.env, AGENT_RELAY_DELEGATED: "1" }, record, runHelper);
       if (abort.signal.aborted) throw abort.signal.reason;
       const invocation = options.invocation(record);
       await lease.markSpawning();

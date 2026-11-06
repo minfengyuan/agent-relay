@@ -4,7 +4,7 @@ This file is the default entry point for coding agents working in this repositor
 
 ## Project in one paragraph
 
-`agent-relay` is a local Node.js/TypeScript MCP server that lets any local stdio MCP client delegate work to ACP coding agents or native Codex. `src/server.ts` exposes the MCP tools; `src/runner/acp-runner.ts` and `src/runner/codex-runner.ts` own protocol execution. `src/runner/worker-host.ts` owns the protocol-independent worker lifecycle used by Codex, while `src/runner/lifecycle.ts` owns process-wide admission and shutdown. `src/adapters/` contains ACP provider policy, and `src/store.ts` persists resumable session metadata and serializes access to a working directory.
+`agent-relay` is a local Node.js/TypeScript MCP server that lets any local stdio MCP client delegate work to ACP coding agents, headless providers, or native Codex. `src/server.ts` exposes the MCP tools; `src/runner/acp-runner.ts`, `src/runner/headless-runner.ts`, and `src/runner/codex-runner.ts` own protocol execution. `src/runner/worker-host.ts` owns the protocol-independent worker lifecycle used by headless providers and Codex, while `src/runner/lifecycle.ts` owns process-wide admission and shutdown. `src/adapters/` contains provider policy, and `src/store.ts` persists resumable session metadata and serializes access to a working directory.
 
 ## Read next only when relevant
 

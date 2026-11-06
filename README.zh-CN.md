@@ -4,7 +4,7 @@
 
 通过一个本地 MCP Server，让任何支持 stdio 的 MCP 客户端调用 **Grok**、**Cursor**、**OpenCode**、**DSH**、**Codex** 和 **Claude Code**。
 
-`agent-relay` 将 MCP 工具调用桥接到本地 Coding Agent，使用 ACP 或 Codex 原生 app-server 协议。调用方负责统一编排和结果审查；relay 执行一轮非交互任务，返回有大小限制的输出和可继续使用的会话 ID。
+`agent-relay` 将 MCP 工具调用桥接到本地 Coding Agent，使用 ACP、Codex 原生 app-server 或 provider 的 headless JSON 传输。调用方负责统一编排和结果审查；relay 执行一轮非交互任务，返回有大小限制的输出和可继续使用的会话 ID。
 
 ## 为什么使用它？
 
@@ -188,6 +188,20 @@ V1 子进程保留 `OPENCODE_PERMISSION` 中的其他规则，同时强制 `ques
 
 2026 年 11 月 3 日，在 macOS、OpenCode 2.0.12 和已配置的 `opencode/pulse-alpha-free` 模型上，六项真实测试在此前 `allow_once` 策略下全部通过。问题工具探针在没有用户输入时返回 `stopReason: "cancelled"`。新的拒绝策略尚未重新进行真实 provider 验证；V1 和 Windows 的真实运行仍未验证。
 
+### DSH
+
+Relay 运行 `dsh --profile headless`，逐行读取 JSON 事件。Relay 自有的 `--patch` 文件紧跟在 `--profile headless` 之后、应用参数之前：一个 `0600` 权限 patch，以及可选的 `0600` 模型路由 patch。Relay 不修改 `$DSH_HOME/profiles/headless/cordis.patch.yml`。任务通过 stdin 写入，不放入 argv。
+
+权限 patch 保留 approval、permission、`tool-web` 策略，删除 profile 自带的 `sandbox-policy` overlay，并重新启用随包提供的 `credentials`、`authorization`、`deepseek-account` 服务。已保存凭据优先；不可用时，DSH 依次回退到启动环境、`<cwd>/.env`、`$DSH_HOME/.env`。空字符串 `DEEPSEEK_API_KEY` 只从子进程环境删除，避免遮蔽 `.env` 后备；Relay 不设置也不读取非空值，父进程环境保持不变。
+
+输入为 `task`、绝对路径 `cwd`，以及可选的 `sessionId`、`model`、`reasoningEffort`。请求 model 或 effort 时，Relay 先在同一工作目录 lease 和超时约束下运行 `dsh --profile headless --patch <permissions> --dump-config`，读取 `agent-default-model.provider`。输出无法解析返回 `INVALID_CONFIG`；预检超时返回 `CONFIG_TIMEOUT`。Relay 不在本地校验模型名；DSH 对未知模型返回通用 `INVALID_REQUEST`，Relay 以带 DSH 错误码和消息的 `ACP_FAILURE` 返回。恢复时省略 `reasoningEffort`，只有 provider/model 路由相同时才保留已保存的显式强度。
+
+新建和恢复的每一轮都显式使用 `--permission-mode workspace-write --approval-policy never`。内置 Web search/fetch 被禁用；shell 网络和外部 MCP 服务仍可用，因此不构成网络隔离。可识别的 `FS_SANDBOX_DENIED`、`AUTO_REVIEW_DENIED` 工具结果会在轮次结束后返回 `PERMISSION_REQUIRED`，并保留后续文本。其他工具错误不算权限拒绝。shell 命令内部的拒绝可能不带可识别错误码，此时只能作为普通工具失败报告。`tool_result.completed` 只表示工具已返回，不代表 shell 命令成功退出。
+
+只有退出码 `0` 且 `final.reason.kind: "completed"` 才算成功。结果文本取自限长后的 `final.text`；DSH 工具调用生成摘要，usage 省略。凭据缺失映射为 `AUTH_UNAVAILABLE`；未知会话和 cwd 不匹配分别映射为 `UNKNOWN_SESSION`、`CWD_MISMATCH`，其他轮次或启动失败使用 `ACP_FAILURE`。取消时先发送 SIGTERM，等待配置的宽限时间，再终止剩余进程树。必须等调用结束再恢复会话，因为只有确认进程清理后才释放工作目录 lease。
+
+会话沿用 `sessions/dsh` 命名空间。旧 ACP 集成留下的裸 UUID 可在相同解析后工作目录中恢复。Relay 只把已确认 ID 作为 `--session-id` 传入，并在每次恢复时重复权限与审批参数。
+
 ### Codex
 
 调用 `codex_delegate` 前先安装 Codex CLI 并完成认证，无需安装 ACP 桥接包。relay 直接启动 `codex app-server --listen stdio://`，沿用 CLI 已有认证，不发起登录。协议兼容基线为 Codex CLI 0.163.0，旧版未经验证。Windows 请将 `AGENT_RELAY_CODEX_COMMAND` 指向原生 `codex.exe`，不支持 `.cmd`/`.bat` 启动器。
@@ -241,16 +255,16 @@ relay 使用各 provider 的原生权限控制，各 provider 的能力不同。
 | Grok | `--sandbox workspace`、`--disable-web-search`、`WebFetch`/`WebSearch` 拒绝规则；沙箱内保留 `--always-approve` | Grok 状态目录和临时目录可写；workspace profile 允许子进程联网；自定义网络限制仅在 Linux 生效，macOS 不等价 |
 | Cursor | `--sandbox enabled --workspace <cwd>`、`approvalMode: allowlist`、`sandbox.networkAccess: user_config_only`，拒绝 `WebFetch(*)` | 自定义沙箱网络白名单及本地/团队策略仍生效；不等于全面禁网 |
 | OpenCode | 强制 V1 `OPENCODE_PERMISSION` 中的 `question`、`external_directory`、`webfetch`、`websearch` 为 `deny`；两个版本均拒绝额外 ACP 审批 | 不转换为 V2 权限规则，V2 自身配置仍生效；没有 OS 沙箱，shell、插件和外部 MCP 工具仍可能越界写入或联网；V1 外部目录拒绝也限制受支持工具的外部读取 |
-| DSH | 原生 `--patch` 将 sandbox mode 与新会话默认预设设为 `workspace-write`，审批为 `ask`，关闭 `web_search`/`web_fetch` | 文件沙箱不限制 shell 网络；恢复会话保留旧 sandbox mode，ACP 无法验证或重置；Windows ACL 和较旧 Linux Landlock 后端可能仅提供部分文件隔离 |
+| DSH | headless `--patch` 在新建和恢复轮次中强制 `workspace-write`、`--approval-policy never`，关闭 `web_search`/`web_fetch`，并恢复凭据存储服务 | 文件沙箱不限制 shell 网络；shell 内部拒绝可能没有可识别错误码；Windows ACL 和较旧 Linux Landlock 后端可能仅提供部分文件隔离 |
 | Claude Code | 新建和恢复会话均设置 `acceptEdits`，拒绝额外 ACP 审批 | 不构成文件系统或网络隔离；原生允许规则、hooks、shell 网络与外部 MCP 服务仍生效 |
 
 **OpenCode 行为变化：** 不再通过 `allow_once` 自动授予权限。有 `reject_once` 就选择拒绝，否则取消，并返回带可用部分结果的 `PERMISSION_REQUIRED`。
 
 Cursor 使用 relay 状态目录下的私有 CLI 配置快照。原有 CLI 设置、认证相关配置、环境凭据及正常的 OS 凭据发现保留；只覆盖上表中的权限/沙箱设置并补齐缺失的配置结构默认值。不修改原 CLI 配置或项目文件。通过 `CURSOR_CONFIG_DIR` 或 `XDG_CONFIG_HOME` 定位原配置；正常数据目录和模型/API 连接保持不变。
 
-DSH 接收包含 relay 随包原生 patch 的私有文件，参数追加在其他启动参数之后。不修改用户 profile；`DSH_PERMISSION_MODE` 仅在子进程环境中设置。原生配置文件在确认进程清理后删除，包括启动失败、取消和超时；无法确认清理时保留文件。配置准备失败会返回结构化错误，不会无约束重试。进程崩溃可能遗留私有目录，只有确认没有工作进程使用时才能删除。
+DSH 接收包含 relay 随包权限 patch 和可选模型 patch 的私有文件，它们紧跟 `--profile headless`，位于应用参数之前。不修改用户 profile；`DSH_PERMISSION_MODE` 仅在子进程环境中设置。原生配置文件在确认进程清理后删除，包括启动失败、取消和超时；无法确认清理时保留文件。配置准备失败会返回结构化错误，不会无约束重试。进程崩溃可能遗留私有目录，只有确认没有工作进程使用时才能删除。
 
-Grok、Cursor、OpenCode、DSH 和 Claude Code 每次执行向 stderr 输出一次有长度限制的策略诊断；DSH 恢复诊断明确指出旧会话权限未统一。诊断不包含凭据或任务文本。上述设置不隔离外部 MCP 服务。自定义可执行文件/包装器必须遵守原生参数与配置；替换可执行文件不代表限制已经生效。
+Grok、Cursor、OpenCode、DSH 和 Claude Code 每次执行向 stderr 输出一次有长度限制的策略诊断。诊断不包含凭据或任务文本。上述设置不隔离外部 MCP 服务。自定义可执行文件/包装器必须遵守原生参数与配置；替换可执行文件不代表限制已经生效。
 
 策略通过各 provider 自身支持的后端面向 macOS、Linux 和 Windows；relay 能启动 CLI 不代表该平台具备可用沙箱。隔离测试验证配置和拒绝行为，不证明真实 CLI 隔离能力。真实 CLI 验收仍需显式启用：在临时工作区检查内部/外部写入、shell 联网、Web 工具与恢复会话，记录 OS、CLI 版本及实际结果。未执行的平台与能力均标记为未验证。
 

@@ -1,8 +1,4 @@
 export const dshPolicyPatch = `
-- id: sandbox-policy
-  config:
-    mode: workspace-write
-    workspaceRoot: !!js process.cwd()
 - id: approval
   config:
     policy: ask
@@ -17,4 +13,10 @@ export const dshPolicyPatch = `
   config:
     search: false
     fetch: false
+- id: credentials
+  disabled: false
+- id: authorization
+  disabled: false
+- id: deepseek-account
+  disabled: false
 `;

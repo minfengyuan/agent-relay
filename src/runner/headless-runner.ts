@@ -54,7 +54,7 @@ export class HeadlessRunner<I extends DelegateInput, R extends RelayResult> {
       displayName: this.adapter.displayName,
       failureCode: this.adapter.failureCode,
       partial,
-      prepare: async (env, record) => {
+      prepare: async (env, record, runHelper) => {
         if (input.sessionId !== undefined && !input.sessionId.trim()) {
           throw new RelayFailure("INVALID_INPUT", "A resumed session ID must be nonempty");
         }
@@ -66,9 +66,10 @@ export class HeadlessRunner<I extends DelegateInput, R extends RelayResult> {
         if (preset !== undefined) validateId(preset);
         effectiveInput = { ...input, ...(expectedId === undefined ? {} : { sessionId: expectedId }) };
         return prepareNativeConfig(this.config.stateDir, "headless", async (directory) => {
-          const prepared = await this.adapter.prepare(effectiveInput, record, directory);
+          const prepared = await this.adapter.prepare(effectiveInput, record, directory, { env, runHelper });
           stdin = prepared.stdin;
-          return { ...prepared, env: { ...env, ...prepared.env } };
+          const merged = { ...env, ...prepared.env };
+          return { ...prepared, env: this.adapter.spawnEnv?.(merged) ?? merged };
         });
       },
       invocation: (record) => this.adapter.command(effectiveInput, record),
@@ -125,14 +126,21 @@ export class HeadlessRunner<I extends DelegateInput, R extends RelayResult> {
               }
               case "permissionDenied":
                 state.permissionDenied ??= boundedString(event.title, 2_048);
+                if (event.id) state.summarizer.onToolCall?.({ toolCallId: event.id, status: "failed" });
                 break;
               case "usage":
                 state.summarizer.onUsage?.({ sessionUpdate: "usage_update", ...event.usage });
                 break;
               case "final":
+                if (event.text !== undefined) {
+                  const appended = appendLimited("", event.text, this.config.textLimitBytes);
+                  state.text = appended.value;
+                  state.truncated ||= appended.truncated;
+                }
                 state.final = {
                   type: "final", stopReason: boundedString(event.stopReason, 256), ok: event.ok,
                   ...(event.error === undefined ? {} : { error: boundedString(event.error, 2_048) }),
+                  ...(event.errorCode === undefined ? {} : { errorCode: boundedString(event.errorCode, 256) }),
                 };
                 terminalReceived();
                 break;

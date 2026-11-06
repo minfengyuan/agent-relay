@@ -344,8 +344,10 @@ function createWorkspaceLease(
   return {
     markSpawning: () => enqueue(() => update((record) => {
       if (record.phase === "spawning") return undefined;
-      requirePhase(record, ["locked"], "mark spawning");
-      return { ...record, phase: "spawning" };
+      requirePhase(record, ["locked", "reaped"], "mark spawning");
+      const { worker: _worker, ...unbound } = record;
+      void _worker;
+      return { ...unbound, phase: "spawning" };
     })),
     bindWorker: (ref) => enqueue(() => update((record) => {
       if (!validWorkerForRuntime(ref)) {

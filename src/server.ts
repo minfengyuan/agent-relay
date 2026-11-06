@@ -2,7 +2,9 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { RelayConfig } from "./config.js";
 import { SessionStore, resolveCwd } from "./store.js";
-import { ClaudeRunner, CodexRunner, CursorRunner, DshRunner, GrokRunner, OpenCodeRunner, type ProgressReporter } from "./runner.js";
+import { ClaudeRunner, CodexRunner, CursorRunner, GrokRunner, OpenCodeRunner, type ProgressReporter } from "./runner.js";
+import { HeadlessRunner } from "./runner/headless-runner.js";
+import { dshAdapter } from "./adapters/dsh.js";
 import { codexUsageSchema } from "./runner/codex-summaries.js";
 import {
   RelayFailure,
@@ -248,7 +250,7 @@ export function createRelayServer(config: RelayConfig): McpServer {
   const runner = new GrokRunner(config, new SessionStore(config.stateDir));
   const cursorRunner = new CursorRunner(config, new SessionStore(config.stateDir, "cursor"));
   const openCodeRunner = new OpenCodeRunner(config, new SessionStore(config.stateDir, "opencode"));
-  const dshRunner = new DshRunner(config, new SessionStore(config.stateDir, "dsh"));
+  const dshRunner = new HeadlessRunner(config, new SessionStore(config.stateDir, "dsh"), dshAdapter(config));
   const codexRunner = new CodexRunner(config, new SessionStore(config.stateDir, "codex"));
   const claudeRunner = new ClaudeRunner(config, new SessionStore(config.stateDir, "claude"));
 
@@ -324,7 +326,7 @@ export function createRelayServer(config: RelayConfig): McpServer {
   registerDelegateTool(server, {
     name: "dsh_delegate",
     title: "Delegate a task to DSH",
-    description: "Runs one DSH ACP prompt with workspace-write defaults, built-in web tools disabled, and extra approvals refused; optionally resumes a saved session. Shell networking remains available; resumed sandbox mode is preserved and cannot be verified through ACP.",
+    description: "Runs one DSH headless turn with workspace-write and never approvals on new and resumed sessions. Built-in web tools are disabled; shell networking and external MCP services remain available. Recognized sandbox/approval denials return PERMISSION_REQUIRED after the turn, preserving later output.",
     inputSchema: dshInputSchema,
     outputSchema: dshOutputSchema,
     run: (input: z.infer<typeof dshInputSchema>, cwd, signal, progress) => dshRunner.delegate({

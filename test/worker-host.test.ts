@@ -133,4 +133,24 @@ describe("WorkerHost", () => {
     await lease.markReaped("no-worker-created");
     await lease.release();
   });
+
+  it("preserves the outer total timeout while a helper subprocess is running", async () => {
+    const { stateDir, cwd } = await setup();
+    const host = new WorkerHost(baseConfig(stateDir, { totalTimeoutMs: 250 }), new SessionStore(stateDir));
+    await expect(host.run({
+      ...driver("Worker"),
+      cwd,
+      prepare: async (env, _record, runHelper) => {
+        await runHelper({
+          command: process.execPath, args: helperArgs(), env, timeoutMs: 5_000,
+        });
+        return { env, dispose: async () => {} };
+      },
+    })).rejects.toMatchObject({ code: "TIMEOUT" });
+    const child = state.children.at(-1);
+    expect(child !== undefined && (child.exitCode !== null || child.signalCode !== null)).toBe(true);
+    const lease = await new SessionStore(stateDir).acquire(cwd);
+    await lease.markReaped("no-worker-created");
+    await lease.release();
+  });
 });

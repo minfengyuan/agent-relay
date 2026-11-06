@@ -299,7 +299,7 @@ describe("MCP server", () => {
       });
 
       await store.writeNew("confirmed-session", cwd);
-      vi.stubEnv("FAKE_ACP_MODE", "resume-fail");
+      vi.stubEnv("FAKE_DSH_TRANSCRIPT", "bad-model");
       await expect(call(32, "confirmed-session")).resolves.toMatchObject({
         provider: "dsh",
         sessionId: "confirmed-session",
@@ -442,7 +442,7 @@ describe("MCP server", () => {
       progressIntervalMs: 1,
     });
     const log = join(stateDir, "dsh-mcp.log");
-    vi.stubEnv("FAKE_ACP_LOG", log);
+    vi.stubEnv("FAKE_DSH_LOG", log);
     const success = await request(10, "tools/call", {
       name: "dsh_delegate",
       arguments: { task: "hello", cwd, model: "dsh/gpt", reasoningEffort: "" },
@@ -453,15 +453,24 @@ describe("MCP server", () => {
         structuredContent?: { provider?: string; text?: string; sessionId?: string };
       };
     };
+    const successTranscript = JSON.parse(await readFile(join(
+      import.meta.dirname, "fixtures/transcripts/dsh-0.2.2-rc.1/credential-restore-run.json",
+    ), "utf8")) as { lines: Array<{ json: { type?: string; text?: string } }> };
+    const successText = successTranscript.lines.findLast((line) => line.json.type === "final")?.json.text;
     expect(success.result?.isError).not.toBe(true);
     expect(success.result?.structuredContent).toMatchObject({
       provider: "dsh",
-      text: "fresh answer",
+      text: successText,
       sessionId: "fake-session-1",
     });
-    const configEvents = (await readFile(log, "utf8")).split(/\r?\n/);
-    expect(configEvents).toContain("set-config:model:dsh/gpt");
-    expect(configEvents).toContain("set-config:reasoning_effort:");
+    const logEvents = (await readFile(log, "utf8")).trim().split("\n").map((line) =>
+      JSON.parse(line) as Record<string, unknown>);
+    const spawns = logEvents.filter((event) => event.event === "spawn");
+    expect(spawns).toHaveLength(2);
+    const modelPatch = (spawns[1]!.patches as Array<{ contents: string }>)[1]!;
+    expect(JSON.parse(modelPatch.contents)[0].config).toEqual({
+      provider: "deepseek-official", model: "dsh/gpt",
+    });
     const progress = notifications.filter((message) =>
       "method" in message && message.method === "notifications/progress",
     );
@@ -479,7 +488,7 @@ describe("MCP server", () => {
     expect(resumed.result?.structuredContent?.sessionId).toBe("fake-session-1");
     expect(await readFile(log, "utf8")).toContain("resume:fake-session-1");
 
-    vi.stubEnv("FAKE_ACP_MODE", "partial-fail");
+    vi.stubEnv("FAKE_DSH_TRANSCRIPT", "bad-model");
     vi.stubEnv("FAKE_SESSION_ID", "partial-session");
     const partial = await request(12, "tools/call", {
       name: "dsh_delegate",
@@ -489,16 +498,14 @@ describe("MCP server", () => {
     expect(partial.result?.structuredContent).toMatchObject({
       provider: "dsh",
       sessionId: "partial-session",
-      text: "partial text",
-      toolCalls: expect.arrayContaining([expect.objectContaining({ toolCallId: "t1" })]),
-      usage: { used: 42, size: 128, cost: { amount: 3.5, currency: "USD" } },
-      error: { code: "ACP_FAILURE" },
+      text: "",
+      error: { code: "ACP_FAILURE", message: expect.stringContaining("INVALID_REQUEST") },
     });
 
-    vi.stubEnv("FAKE_ACP_MODE", "hang");
+    vi.stubEnv("FAKE_DSH_TRANSCRIPT", "sigterm-tool");
     vi.stubEnv("FAKE_SESSION_ID", "cancel-session");
     const hangLog = join(stateDir, "dsh-cancel.log");
-    vi.stubEnv("FAKE_ACP_LOG", hangLog);
+    vi.stubEnv("FAKE_DSH_LOG", hangLog);
     const cancelled = request(13, "tools/call", {
       name: "dsh_delegate",
       arguments: { task: "hang", cwd },
@@ -535,7 +542,7 @@ describe("MCP server", () => {
       totalTimeoutMs: 1_500,
       cancelGraceMs: 100,
     });
-    vi.stubEnv("FAKE_ACP_MODE", "hang");
+    vi.stubEnv("FAKE_DSH_TRANSCRIPT", "sigterm-tool");
     vi.stubEnv("FAKE_SESSION_ID", "cancel-session");
     const hung = await request(12, "tools/call", {
       name: "dsh_delegate",

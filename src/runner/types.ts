@@ -1,6 +1,7 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import type { DelegateInput, RelayErrorCode, RelayFailure, RelayResult, UsageSummary } from "../types.js";
 import type { SessionRecord } from "../store.js";
+import type { PreparationHelper } from "./worker-host.js";
 
 export type ProgressReporter = (message: string) => Promise<void> | void;
 
@@ -53,7 +54,7 @@ export type HeadlessEvent = (
   | { type: "toolResult"; id: string; status: string }
   | { type: "permissionDenied"; id?: string; title: string }
   | { type: "usage"; usage: UsageSummary }
-  | { type: "final"; stopReason: string; ok: boolean; error?: string }
+  | { type: "final"; stopReason: string; ok: boolean; error?: string; errorCode?: string; text?: string }
   | { type: "error"; message: string }
   | { type: "ignore" }
 ) & { sessionId?: string };
@@ -73,9 +74,13 @@ export type HeadlessExit = { code: number | null; signal: NodeJS.Signals | null 
 export type HeadlessAdapter<I extends DelegateInput, R extends RelayResult> = {
   displayName: string;
   failureCode: RelayErrorCode;
-  prepare(input: I, record: SessionRecord | undefined, directory: string): Promise<Omit<PreparedSpawn, "dispose"> & {
+  prepare(input: I, record: SessionRecord | undefined, directory: string, context: {
+    env: NodeJS.ProcessEnv;
+    runHelper: PreparationHelper;
+  }): Promise<Omit<PreparedSpawn, "dispose"> & {
     stdin: HeadlessStdin;
   }>;
+  spawnEnv?(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
   command(input: I, record?: SessionRecord): { command: string; args: string[] };
   presetSessionId?(input: I, record?: SessionRecord): string | undefined;
   decode(event: unknown): HeadlessEvent;
