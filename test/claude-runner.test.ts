@@ -1,247 +1,252 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { claudeSpawnSpec } from "../src/adapters/claude.js";
+import { claudeSpawnSpec, ClaudeRunner } from "../src/adapters/claude.js";
 import { loadConfig } from "../src/config.js";
-import { ClaudeRunner, CodexRunner, cleanupAllChildren } from "../src/runner.js";
+import { CodexRunner, cleanupAllChildren } from "../src/runner.js";
 import { SessionStore } from "../src/store.js";
-import { TestAcpRunner, baseConfig, claudeFixture, tempDir, useRunnerCleanup, waitForLog } from "./helpers.js";
+import type { ClaudeRelayResult } from "../src/types.js";
+import {
+  TestAcpRunner, baseConfig, claudeFixture, tempDir, useRunnerCleanup, waitForLog,
+} from "./helpers.js";
 
 const dirs: string[] = [];
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 15_000 });
 useRunnerCleanup(dirs);
 
 async function harness(overrides: Partial<ReturnType<typeof baseConfig>> = {}) {
   const state = await tempDir(dirs);
   const cwd = await tempDir(dirs);
   const log = join(state, "claude.log");
-  vi.stubEnv("FAKE_ACP_LOG", log);
+  vi.stubEnv("FAKE_CLAUDE_LOG", log);
   const config = baseConfig(state, overrides);
   const store = new SessionStore(state, "claude");
   const runner = new ClaudeRunner(config, store);
-  const events = () => readFile(log, "utf8");
+  const spawn = async () => JSON.parse((await readFile(log, "utf8")).split("\n")[0]!) as {
+    args: string[]; id: string; cwd: string; task: string; delegated: string;
+    model: string | null; effort: string | null;
+  };
   const assertReleased = async () => {
     const lease = await store.acquire(cwd);
     await lease.markReaped("no-worker-created");
     await lease.release();
   };
-  return { state, cwd, log, config, store, runner, events, assertReleased };
+  return { state, cwd, log, config, store, runner, spawn, assertReleased };
 }
 
-describe("ClaudeRunner", () => {
-  it("uses the bridge command without native CLI flags", () => {
-    if (process.platform !== "win32") {
-      expect(claudeSpawnSpec(loadConfig({}))).toEqual({ command: "claude-agent-acp", args: [] });
-    }
+describe.skipIf(process.platform === "win32")("Claude headless runner", () => {
+  it("uses the native CLI by default and the configured headless fixture", () => {
+    expect(claudeSpawnSpec(loadConfig({}))).toEqual({ command: "claude", args: [] });
     expect(claudeSpawnSpec(baseConfig("unused"))).toEqual({ command: process.execPath, args: [claudeFixture] });
   });
 
   it("rejects missing commands and nested relay delegation without leaking a lease", async () => {
-    const { config, store, cwd, assertReleased } = await harness();
+    const fixture = await harness();
     const runner = new ClaudeRunner({
-      ...config, claudeCommand: join(cwd, "missing-bridge"), claudeCommandArgs: [],
-    }, store);
-    await expect(runner.delegate({ task: "one", cwd })).rejects.toMatchObject({ code: "ACP_FAILURE" });
-    await assertReleased();
+      ...fixture.config, claudeCommand: join(fixture.cwd, "missing-claude"), claudeCommandArgs: [],
+    }, fixture.store);
+    await expect(runner.delegate({ task: "one", cwd: fixture.cwd })).rejects.toMatchObject({ code: "ACP_FAILURE" });
+    await fixture.assertReleased();
     vi.stubEnv("AGENT_RELAY_DELEGATED", "1");
-    await expect(runner.delegate({ task: "one", cwd })).rejects.toMatchObject({ code: "NESTED_DELEGATION" });
-    await assertReleased();
+    await expect(runner.delegate({ task: "one", cwd: fixture.cwd })).rejects.toMatchObject({ code: "NESTED_DELEGATION" });
+    await fixture.assertReleased();
   });
 
-  it("executes with acceptEdits, no interactive authentication, bounded summaries and progress", async () => {
-    const { runner, cwd, events, assertReleased } = await harness();
-    vi.stubEnv("CLAUDE_CODE_EXECUTABLE", "/custom/claude");
-    const progress = vi.fn();
-    const result = await runner.delegate({ task: "one", cwd, model: "sonnet", effort: "high" }, undefined, progress);
+  it("replays success with exact headless flags, stdin, UUID persistence, summaries, and progress", async () => {
+    const fixture = await harness();
+    const progress: string[] = [];
+    const result = await fixture.runner.delegate(
+      { task: "read a.txt\n", cwd: fixture.cwd, model: "sonnet", effort: "high" },
+      undefined,
+      (message) => { progress.push(message); },
+    );
+    const spawn = await fixture.spawn();
+    expect(spawn.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(spawn).toMatchObject({
+      cwd: fixture.cwd, task: "read a.txt\n", delegated: "1", model: "sonnet", effort: "high",
+    });
+    expect(spawn.args).toEqual([
+      "-p", "--output-format", "stream-json", "--verbose",
+      "--permission-mode", "acceptEdits", "--permission-prompts", "none",
+      "--model", "sonnet", "--effort", "high", "--session-id", spawn.id,
+    ]);
+    expect(spawn.args).not.toContain("read a.txt\n");
+    expect(spawn.args).not.toContain("acp");
     expect(result).toMatchObject({
-      provider: "claude", sessionId: "claude-session", text: "fresh answer", stopReason: "end_turn", truncated: false,
-      toolCalls: [{ toolCallId: "tool-1", title: "Fake tool", status: "completed" }],
-      usage: { used: 42, size: 128, cost: { amount: 0.25, currency: "USD" } },
+      provider: "claude", sessionId: spawn.id, stopReason: "end_turn",
+      text: "hello-spike", truncated: false,
+      toolCalls: [
+        { title: "Read" },
+        { status: "completed" },
+      ],
     });
-    const log = await events();
-    const capabilities = JSON.parse(log.split("\n").find((line) => line.startsWith("initialize:"))!.slice("initialize:".length));
-    expect(capabilities.terminal).not.toBe(true);
-    expect(capabilities.auth?.terminal).not.toBe(true);
-    expect(capabilities.fs?.readTextFile).not.toBe(true);
-    expect(capabilities.fs?.writeTextFile).not.toBe(true);
-    expect(capabilities.elicitation).toBeUndefined();
-    expect(log).toContain("delegated:1");
-    expect(log).toContain("executable:/custom/claude");
-    expect(log).toContain("This is a noninteractive delegated task.");
-    expect(log).not.toContain("authenticate");
-    expect(log).toContain("set:model:sonnet\nset:effort:high\nset:mode:acceptEdits\nprompt:");
-    expect(log).toContain('"mode":"acceptEdits"');
-    expect(log).toContain("close:claude-session");
-    expect(progress).toHaveBeenCalledWith("Fake tool");
-    await assertReleased();
+    expect(result.usage).toBeUndefined();
+    expect(progress).toContain("Read");
+    await expect(fixture.store.read(spawn.id, fixture.cwd)).resolves.toMatchObject({ cwd: fixture.cwd });
   });
 
-  it("restores across processes and preserves omitted model/effort while resetting the saved mode", async () => {
-    const { runner, cwd, state, config, store, events } = await harness();
-    const saved = join(state, "options.json");
-    vi.stubEnv("FAKE_CLAUDE_STATE", saved);
-    const created = await runner.delegate({ task: "one", cwd, model: "fast", effort: "low" });
-    await writeFile(saved, JSON.stringify({ model: "fast", effort: "low", mode: "bypassPermissions" }));
-    const restored = await new ClaudeRunner(config, store).delegate({ task: "two", cwd, sessionId: created.sessionId! });
-    expect(restored.sessionId).toBe(created.sessionId);
-    const log = await events();
-    expect(log.match(/set:model:/g)).toHaveLength(1);
-    expect(log.match(/set:effort:/g)).toHaveLength(1);
-    expect(log.match(/set:mode:acceptEdits/g)).toHaveLength(2);
-    expect(log.match(/"mode":"acceptEdits"/g)).toHaveLength(2);
-    expect(log).toContain("resume:claude-session");
-    expect(log).not.toContain("load:");
+  it("resumes a relay-recorded UUID in the Claude namespace and touches the record", async () => {
+    const fixture = await harness();
+    const id = randomUUID();
+    await fixture.store.writeNew(id, fixture.cwd);
+    vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "resume-success");
+    const touch = vi.spyOn(fixture.store, "touch");
+    const result = await fixture.runner.delegate({ task: "continue", cwd: fixture.cwd, sessionId: id });
+    expect(result).toMatchObject({ provider: "claude", sessionId: id, text: "hello-spike", stopReason: "end_turn" });
+    const spawn = await fixture.spawn();
+    expect(spawn.args).toEqual([
+      "-p", "--output-format", "stream-json", "--verbose",
+      "--permission-mode", "acceptEdits", "--permission-prompts", "none",
+      "--resume", id,
+    ]);
+    expect(spawn.args).not.toContain("--session-id");
+    expect(touch).toHaveBeenCalledTimes(1);
   });
 
-  it("loads only when resume is absent and excludes history replay", async () => {
-    const { runner, store, cwd, events } = await harness();
-    await store.writeNew("claude-session", cwd);
-    vi.stubEnv("FAKE_ACP_MODE", "load-only");
-    const result = await runner.delegate({ task: "one", cwd, sessionId: "claude-session" });
-    expect(result.text).toBe("fresh answer");
-    expect(result.toolCalls).toHaveLength(1);
-    expect(await events()).toContain("load:claude-session");
-    expect(await events()).not.toContain("new:");
+  it("rejects a recorded title before spawning so --resume never performs title matching", async () => {
+    const fixture = await harness();
+    await fixture.store.writeNew("a saved conversation", fixture.cwd);
+    await expect(fixture.runner.delegate({
+      task: "continue", cwd: fixture.cwd, sessionId: "a saved conversation",
+    })).rejects.toMatchObject({ code: "UNKNOWN_SESSION" });
+    await expect(stat(fixture.log)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it.each([
-    ["resume-fail", "ACP_FAILURE"],
-    ["no-restore", "RESUME_UNSUPPORTED"],
-  ])("never replaces an existing session after %s", async (mode, code) => {
-    const { runner, store, cwd, events } = await harness();
-    await store.writeNew("claude-session", cwd);
-    vi.stubEnv("FAKE_ACP_MODE", mode);
-    await expect(runner.delegate({ task: "one", cwd, sessionId: "claude-session" })).rejects.toMatchObject({
-      code, partial: { sessionId: "claude-session" },
+  it("maps an unknown provider session without creating a replacement", async () => {
+    const fixture = await harness();
+    const id = randomUUID();
+    await fixture.store.writeNew(id, fixture.cwd);
+    vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "resume-unknown");
+    await expect(fixture.runner.delegate({ task: "continue", cwd: fixture.cwd, sessionId: id }))
+      .rejects.toMatchObject({ code: "UNKNOWN_SESSION", partial: { provider: "claude", sessionId: id } });
+    expect((await fixture.spawn()).args).not.toContain("--session-id");
+  });
+
+  it("passes an unknown model through because the gateway decides whether it is valid", async () => {
+    const fixture = await harness();
+    vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "unknown-model-accepted");
+    const result = await fixture.runner.delegate({
+      task: "read", cwd: fixture.cwd, model: "no-such-model-xyz",
     });
-    expect(await events()).not.toContain("new:");
-    expect(await events()).not.toContain("load:");
+    expect(result).toMatchObject({ provider: "claude", text: "hello-spike", stopReason: "end_turn" });
+    expect((await fixture.spawn()).args).toContain("no-such-model-xyz");
   });
 
-  it.each(["UNKNOWN_SESSION", "CWD_MISMATCH"] as const)("rejects %s before launching a worker", async (code) => {
-    const { runner, store, cwd, events, assertReleased } = await harness();
-    if (code === "CWD_MISMATCH") await store.writeNew("claude-session", await tempDir(dirs));
-    await expect(runner.delegate({ task: "one", cwd, sessionId: "claude-session" })).rejects.toMatchObject({
-      code, partial: { sessionId: null },
+  it("rejects an unsupported effort locally before spawning", async () => {
+    const fixture = await harness();
+    await expect(fixture.runner.delegate({ task: "one", cwd: fixture.cwd, effort: "extreme-xyz" }))
+      .rejects.toMatchObject({ code: "INVALID_CONFIG", message: expect.stringContaining("low, medium, high, xhigh, max") });
+    await expect(stat(fixture.log)).rejects.toMatchObject({ code: "ENOENT" });
+    await fixture.assertReleased();
+  });
+
+  it("defensively fails when Claude ignores an effort value and warns on stderr", async () => {
+    const fixture = await harness({ textLimitBytes: 16 });
+    vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "unknown-effort-ignored");
+    await expect(fixture.runner.delegate({ task: "one", cwd: fixture.cwd, effort: "high" }))
+      .rejects.toMatchObject({ code: "INVALID_CONFIG", message: expect.stringContaining("unknown effort") });
+  });
+
+  it("reports post-turn permission denials while preserving output after the model continued", async () => {
+    const fixture = await harness();
+    vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "permission-denied-continues");
+    const error = await fixture.runner.delegate({ task: "denied", cwd: fixture.cwd })
+      .catch((failure: unknown) => failure);
+    const spawn = await fixture.spawn();
+    expect(error).toMatchObject({
+      code: "PERMISSION_REQUIRED",
+      partial: {
+        provider: "claude", text: expect.stringContaining("b.txt"),
+        sessionId: spawn.id,
+      },
     });
-    await expect(events()).rejects.toMatchObject({ code: "ENOENT" });
-    await assertReleased();
+    expect((error as Error).message).toContain("Bash");
+    expect((error as { partial: ClaudeRelayResult }).partial.toolCalls).toEqual([
+      { toolCallId: "call_00_FmnQtuplrg74S1JOc49s6145", title: "Bash" },
+      { toolCallId: "call_00_FmnQtuplrg74S1JOc49s6145", status: "failed" },
+      { toolCallId: "toolu_013xEx22fgxQ6QdQhaQr9Kbk", title: "Write" },
+      { toolCallId: "toolu_013xEx22fgxQ6QdQhaQr9Kbk", status: "completed" },
+      { toolCallId: "call_00_FmnQtuplrg74S1JOc49s6145", status: "failed" },
+    ]);
   });
 
-  it("refreshes grouped model choices and effort choices after model changes", async () => {
-    const { runner, cwd } = await harness();
-    vi.stubEnv("FAKE_ACP_MODE", "grouped");
-    await expect(runner.delegate({ task: "one", cwd, model: "fast", effort: "high" })).rejects.toMatchObject({
-      code: "INVALID_CONFIG", partial: { sessionId: "claude-session" },
-    });
-  });
-
-  it.each([
-    ["no-effort", { effort: "high" }, "CONFIG_UNSUPPORTED"],
-    ["normal", { effort: "invalid" }, "INVALID_CONFIG"],
-    ["normal", { model: "invalid" }, "INVALID_CONFIG"],
-    ["no-mode", {}, "CONFIG_UNSUPPORTED"],
-    ["no-accept-edits", {}, "INVALID_CONFIG"],
-    ["mode-ignored", {}, "INVALID_CONFIG"],
-    ["mode-fail", {}, "ACP_FAILURE"],
-    ["config-timeout", {}, "CONFIG_TIMEOUT"],
-  ])("stops before prompting on %s configuration errors", async (mode, options, code) => {
-    const { runner, cwd, store, events, assertReleased } = await harness({ phaseTimeoutMs: 700 });
-    vi.stubEnv("FAKE_ACP_MODE", mode);
-    await expect(runner.delegate({ task: "one", cwd, ...options })).rejects.toMatchObject({
-      code, partial: { sessionId: "claude-session" },
-    });
-    expect((await store.read("claude-session", cwd)).sessionId).toBe("claude-session");
-    expect(await events()).not.toContain("prompt:");
-    expect(await events()).toContain("close:claude-session");
-    await assertReleased();
-  });
-
-  it.each(["auth-new", "auth-prompt"])("maps structured %s errors without starting login", async (mode) => {
-    const { runner, cwd, events } = await harness();
-    vi.stubEnv("FAKE_ACP_MODE", mode);
-    await expect(runner.delegate({ task: "one", cwd })).rejects.toMatchObject({
-      code: "AUTH_UNAVAILABLE", partial: { sessionId: mode === "auth-new" ? null : "claude-session" },
-    });
-    expect(await events()).not.toContain("authenticate");
-  });
-
-  it.each(["permission", "permission-missing"])("refuses %s and retains partial output", async (mode) => {
-    const { runner, cwd, events, assertReleased } = await harness();
-    vi.stubEnv("FAKE_ACP_MODE", mode);
-    await expect(runner.delegate({ task: "one", cwd })).rejects.toMatchObject({
-      code: "PERMISSION_REQUIRED", partial: { provider: "claude", sessionId: "claude-session", text: "fresh answer" },
-    });
-    const log = await events();
-    expect(log).toContain(mode === "permission" ? '"optionId":"reject"' : '"outcome":"cancelled"');
-    expect(log).not.toContain('"optionId":"allow"');
-    expect(log).toContain("cancel:claude-session");
-    await assertReleased();
-  });
-
-  it.each([
-    ["no-close", "SESSION_CLOSE_UNSUPPORTED"],
-    ["wrong-protocol", "PROTOCOL_MISMATCH"],
-    ["close-fail", "SESSION_CLOSE_FAILED"],
-    ["close-timeout", "SESSION_CLOSE_TIMEOUT"],
-    ["partial-fail", "ACP_FAILURE"],
-    ["new-timeout", "NEW_SESSION_TIMEOUT"],
-  ])("cleans up on %s", async (mode, code) => {
-    const { runner, cwd, assertReleased } = await harness({ phaseTimeoutMs: 700 });
-    vi.stubEnv("FAKE_ACP_MODE", mode);
-    await expect(runner.delegate({ task: "one", cwd })).rejects.toMatchObject({ code });
-    await assertReleased();
-  });
-
-  it.each(["large", "summary-large"])("bounds %s output", async (mode) => {
-    const { runner, cwd } = await harness({ textLimitBytes: 100 });
-    vi.stubEnv("FAKE_ACP_MODE", mode);
-    const result = await runner.delegate({ task: "one", cwd });
-    expect(result.truncated).toBe(true);
-    expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(100);
-    if (mode === "summary-large") expect(result.summariesTruncated).toBe(true);
-  });
-
-  it.each(["caller", "shutdown", "timeout"])("cleans hanging descendants on %s cancellation", async (source) => {
-    const { runner, cwd, log, events, assertReleased } = await harness({ totalTimeoutMs: source === "timeout" ? 2000 : 15000 });
-    vi.stubEnv("FAKE_ACP_MODE", "descendant-hang");
+  it("waits for SIGTERM exit 143 without a result and maps caller cancellation to CANCELLED", async () => {
+    const fixture = await harness();
+    vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "sigterm-before-tool");
     const controller = new AbortController();
-    const result = runner.delegate({ task: "one", cwd }, controller.signal).catch((error: unknown) => error);
-    await waitForLog(log, "descendant:");
-    if (source === "caller") controller.abort();
-    if (source === "shutdown") await cleanupAllChildren();
-    expect(await result).toMatchObject({ code: source === "timeout" ? "TIMEOUT" : "CANCELLED" });
-    const descendant = Number((await events()).match(/descendant:(\d+)/)?.[1]);
-    expect(() => process.kill(descendant, 0)).toThrow();
-    await assertReleased();
+    const pending = fixture.runner.delegate({ task: "wait", cwd: fixture.cwd }, controller.signal)
+      .catch((error: unknown) => error);
+    await waitForLog(fixture.log, "waiting");
+    controller.abort();
+    await expect(pending).resolves.toMatchObject({
+      code: "CANCELLED", partial: { provider: "claude", sessionId: expect.any(String) },
+    });
+    expect(await readFile(fixture.log, "utf8")).toContain("root-sigterm");
   });
 
-  it("cleans descendants after success", async () => {
-    const { runner, cwd, events, assertReleased } = await harness();
-    vi.stubEnv("FAKE_ACP_MODE", "descendant");
-    await runner.delegate({ task: "one", cwd });
-    const descendant = Number((await events()).match(/descendant:(\d+)/)?.[1]);
-    expect(() => process.kill(descendant, 0)).toThrow();
-    await assertReleased();
+  it("never treats SIGTERM exit 143 without a result as success", async () => {
+    const fixture = await harness();
+    vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "sigterm-before-tool");
+    vi.stubEnv("FAKE_CLAUDE_REPLAY_CANCEL", "1");
+    await expect(fixture.runner.delegate({ task: "wait", cwd: fixture.cwd })).rejects.toMatchObject({
+      code: "ACP_FAILURE", message: expect.stringContaining("143"),
+      partial: { provider: "claude", sessionId: expect.any(String) },
+    });
+  });
+
+  it("cancels during a tool after SIGTERM and never returns a successful result", async () => {
+    const fixture = await harness();
+    vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "sigterm-during-tool");
+    const controller = new AbortController();
+    const pending = fixture.runner.delegate({ task: "tool", cwd: fixture.cwd }, controller.signal)
+      .catch((error: unknown) => error);
+    await waitForLog(fixture.log, "waiting");
+    controller.abort();
+    await expect(pending).resolves.toMatchObject({
+      code: "CANCELLED", partial: { provider: "claude", sessionId: expect.any(String) },
+    });
+    expect(await readFile(fixture.log, "utf8")).toContain("root-sigterm");
+  });
+
+  it("bounds result text and rejects an inconsistent init session ID", async () => {
+    const fixture = await harness({ textLimitBytes: 5 });
+    const result = await fixture.runner.delegate({ task: "one", cwd: fixture.cwd });
+    expect(result.text).toBe("hello");
+    expect(result.truncated).toBe(true);
+
+    vi.stubEnv("FAKE_CLAUDE_MISMATCH", "1");
+    await expect(fixture.runner.delegate({ task: "two", cwd: fixture.cwd }))
+      .rejects.toMatchObject({ code: "PROTOCOL_MISMATCH" });
+  });
+
+  it("cleans up caller cancellation through shared shutdown", async () => {
+    const fixture = await harness();
+    vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "sigterm-before-tool");
+    const pending = fixture.runner.delegate({ task: "wait", cwd: fixture.cwd }).catch((error: unknown) => error);
+    await waitForLog(fixture.log, "waiting");
+    await cleanupAllChildren();
+    await expect(pending).resolves.toMatchObject({ code: "CANCELLED" });
+    await fixture.assertReleased();
   });
 
   it("shares the cwd lock with ACP and native runners while allowing other workspaces", async () => {
-    const { runner, cwd, log, config, state } = await harness();
-    vi.stubEnv("FAKE_ACP_MODE", "hang");
+    const fixture = await harness();
+    vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "sigterm-before-tool");
     const controller = new AbortController();
-    const running = runner.delegate({ task: "one", cwd }, controller.signal).catch((error: unknown) => error);
-    await waitForLog(log, "prompt:claude-session");
+    const running = fixture.runner.delegate({ task: "one", cwd: fixture.cwd }, controller.signal)
+      .catch((error: unknown) => error);
+    await waitForLog(fixture.log, "waiting");
     try {
       for (const other of [
-        new TestAcpRunner(config, new SessionStore(state)),
-        new CodexRunner(config, new SessionStore(state, "codex")),
+        new TestAcpRunner(fixture.config, new SessionStore(fixture.state)),
+        new CodexRunner(fixture.config, new SessionStore(fixture.state, "codex")),
       ]) {
-        await expect(other.delegate({ task: "two", cwd })).rejects.toMatchObject({ code: "WORKSPACE_BUSY" });
+        await expect(other.delegate({ task: "two", cwd: fixture.cwd })).rejects.toMatchObject({ code: "WORKSPACE_BUSY" });
       }
-      vi.stubEnv("FAKE_ACP_MODE", "normal");
-      vi.stubEnv("FAKE_SESSION_ID", "other-claude-session");
-      await expect(runner.delegate({ task: "three", cwd: await tempDir(dirs) })).resolves.toMatchObject({
-        sessionId: "other-claude-session", text: "fresh answer",
+      vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "new-session-success");
+      await expect(fixture.runner.delegate({ task: "three", cwd: await tempDir(dirs) })).resolves.toMatchObject({
+        provider: "claude", text: "hello-spike",
       });
     } finally {
       controller.abort();

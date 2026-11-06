@@ -94,6 +94,10 @@ describe("append-agent-relay-instructions", () => {
     expect(first).toContain("`dsh_delegate`");
     expect(first).toContain("`codex_delegate`");
     expect(first).toContain("`claude_delegate`");
+    expect(first).toContain("Claude Code CLI headless mode");
+    expect(first).toContain("Pass the returned UUID `sessionId` with the same `cwd` to resume");
+    expect(first).toContain("automatically denies approval-requiring tools");
+    expect(first).toContain("returns PERMISSION_REQUIRED after it finishes");
     expect(first).toContain("INTERACTION_REQUIRED");
     expect(first).toContain("PERMISSION_REQUIRED");
     expect(first).toContain("allow_once");

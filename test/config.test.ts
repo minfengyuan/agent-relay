@@ -7,11 +7,11 @@ import { OpenCodeSummaries, StandardSummaries } from "../src/runner/summaries.js
 import type * as acp from "@agentclientprotocol/sdk";
 
 describe("loadConfig", () => {
-  it("defaults to the Claude ACP bridge and trims its executable override", () => {
-    expect(loadConfig({}).claudeCommand).toBe("claude-agent-acp");
+  it("defaults to the Claude Code CLI and trims its executable override", () => {
+    expect(loadConfig({}).claudeCommand).toBe("claude");
     expect(loadConfig({}).claudeCommandArgs).toBeUndefined();
     expect(loadConfig({ AGENT_RELAY_CLAUDE_COMMAND: " /bin/bridge " }).claudeCommand).toBe("/bin/bridge");
-    expect(loadConfig({ AGENT_RELAY_CLAUDE_COMMAND: " " }).claudeCommand).toBe("claude-agent-acp");
+    expect(loadConfig({ AGENT_RELAY_CLAUDE_COMMAND: " " }).claudeCommand).toBe("claude");
   });
   it("keeps the Grok workspace sandbox and disables native web tools", () => {
     expect(loadConfig({}).commandArgs).toEqual([

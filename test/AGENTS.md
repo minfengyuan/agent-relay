@@ -4,7 +4,7 @@ These instructions apply to `test/**`. Read the root [`AGENTS.md`](../AGENTS.md)
 
 ## Test strategy
 
-The default suite must be hermetic. Relay behavior is tested by spawning deterministic fake ACP agents, a fake headless DSH CLI, and a fake Codex app-server from `test/fixtures/`, not by invoking a developer's installed CLI.
+The default suite must be hermetic. Relay behavior is tested by spawning deterministic fake ACP agents, fake headless CLI transcript replays, and a fake Codex app-server from `test/fixtures/`, not by invoking a developer's installed CLI.
 
 Real-agent smoke tests are separate and opt-in because they depend on local executables, authentication, provider versions, network/service availability, and provider-side behavior.
 
@@ -57,7 +57,7 @@ Use the narrowest test file that owns the behavior:
 - `dsh-windows-command.test.ts` — verified DSH npm/pnpm launchers without shell execution.
 - `codex-runner.test.ts` — native Codex protocol, session, permission, and lifecycle behavior.
 - `codex-shutdown.test.ts` — shared shutdown across Codex and ACP workers.
-- `claude-runner.test.ts` — Claude ACP permissions, configuration, session restore and cleanup.
+- `claude-runner.test.ts` — Claude headless transcript replay, UUID sessions, local effort validation, post-turn permissions, cancellation, and cleanup.
 - `claude-windows-command.test.ts` — verified Claude npm/pnpm launchers without shell execution.
 - `claude-shutdown.test.ts` — shared shutdown across Claude and native workers.
 - `claude-cleanup.test.ts` — unconfirmed Claude cleanup retains the orphaned workspace lease.

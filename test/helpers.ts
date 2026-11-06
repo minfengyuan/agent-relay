@@ -60,7 +60,7 @@ export const cursorFixture = grokFixture;
 export const opencodeFixture = join(fixtures, "fake-opencode-agent.mjs");
 export const dshFixture = join(fixtures, "fake-dsh-headless.mjs");
 export const codexFixture = join(fixtures, "fake-codex-server.mjs");
-export const claudeFixture = join(fixtures, "fake-claude-agent.mjs");
+export const claudeFixture = join(fixtures, "fake-claude-headless.mjs");
 export const backpressureFixture = join(fixtures, "backpressure-agent.mjs");
 
 export async function tempDir(dirs: string[], prefix = "relay-"): Promise<string> {

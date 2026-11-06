@@ -18,7 +18,7 @@ afterEach(async () => {
   }
 });
 
-describe.skipIf(!enabled)("real Claude Code ACP smoke", () => {
+describe.skipIf(!enabled)("real Claude Code headless smoke", () => {
   it("edits a disposable workspace and restores a persistent session across processes", async () => {
     if (process.env.AGENT_RELAY_DELEGATED === "1") throw new Error("Run real Claude smoke outside a delegated worker");
     const root = await tempDir(roots, "claude-real-");

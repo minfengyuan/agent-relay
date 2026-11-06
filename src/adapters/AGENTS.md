@@ -105,13 +105,16 @@ When changing an existing adapter, walk through the contract in this order:
 
 ### Claude Code
 
-- Use the external `claude-agent-acp` executable (baseline `@agentclientprotocol/claude-agent-acp@0.100.0`), with ACP v1 and no interactive `authenticate`. Preserve local credentials and `CLAUDE_CODE_EXECUTABLE`.
-- Existing relay-confirmed sessions prefer resume; use load only when resume is not advertised. Never create a replacement after restore failure. Persist new records before configuration.
-- Set model then effort from advertised config options, refresh after each response, then set and verify `mode: acceptEdits` before every prompt, including restored sessions.
-- Do not advertise terminal authentication, file/terminal services, or elicitation UI. Refuse permission requests via `reject_once` or cancel and return `PERMISSION_REQUIRED`. Native allow rules, hooks and networking still apply; this is not OS isolation.
-- Require and await `session/close`; reuse the common lifecycle and cleanup path. Map only structured ACP `authRequired` errors to `AUTH_UNAVAILABLE` through `mapError`, without message matching.
-- Windows launchers use `windows-command.ts` with the official package name, bin name and entry path. Keep the DSH resolver wrapper compatible.
-- Summaries use `StandardSummaries` with provider `"claude"` and ACP usage semantics.
+- Use `HeadlessAdapter`, not ACP. `AGENT_RELAY_CLAUDE_COMMAND` selects the Claude Code CLI and defaults to `claude`; the baseline environment is Claude Code 2.1.318.
+- Run `claude -p --output-format stream-json --verbose --permission-mode acceptEdits --permission-prompts none [--model MODEL] [--effort EFFORT]`, followed by `--session-id UUID` for a new session or `--resume UUID` for a recorded one. Write the task to stdin; do not put it in argv.
+- Validate `effort` locally against `low`, `medium`, `high`, `xhigh`, and `max` before spawn because the CLI silently ignores unknown values. Pass `model` through unchanged because acceptance depends on the configured gateway.
+- Generate a UUID for each new session and persist it when `system/init` arrives, before the model call. Resume only a relay-recorded UUID in the original `cwd`; keep the `sessions/claude` namespace, and never create a replacement after an unknown resume.
+- Decode `system/init` as the session event, `assistant` text/tool-use blocks as text/tool progress, `user` tool-result blocks as bounded tool summaries, and the terminal `result` as the final event. Ignore hooks, commands-changed, rate-limit, progress, and unknown event types.
+- A nonempty `result.permission_denials` becomes a post-turn `permissionDenied`, so the turn fails with `PERMISSION_REQUIRED` while preserving later text and summaries. The model may continue after a denial; `acceptEdits` and native allow rules are not OS isolation.
+- Success requires exit `0` and `result.is_error: false`. Map `No conversation found with session ID` to `UNKNOWN_SESSION`, authentication diagnostics to `AUTH_UNAVAILABLE`, and other error results/subtypes to `ACP_FAILURE`. A SIGTERM exit `143` without a result is never success.
+- Cancel with SIGTERM and wait up to at least 5 seconds for the actual process exit before process-tree termination. Keep the caller cancellation/timeout reason.
+- Windows launchers use `windows-command.ts` with `@anthropic-ai/claude-code`, `bin.claude`, and `cli.js`. Keep the DSH resolver wrapper compatible.
+- Summaries use `StandardSummaries` with provider `"claude"`. Return tool calls; omit usage because CLI token counters do not map to the relay's `used`/`size` shape.
 
 ## Adding a provider
 

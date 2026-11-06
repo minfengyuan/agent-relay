@@ -137,7 +137,7 @@ describe("MCP server", () => {
       claudeCommand: process.execPath, claudeCommandArgs: [claudeFixture], cancelGraceMs: 100, progressIntervalMs: 1,
     });
     const log = join(stateDir, "claude.log");
-    vi.stubEnv("FAKE_ACP_LOG", log);
+    vi.stubEnv("FAKE_CLAUDE_LOG", log);
     type Response = { result?: { isError?: boolean; content?: Array<{ text: string }>; structuredContent?: Record<string, unknown> } };
     const call = async (id: number, args: Record<string, unknown>) => {
       const response = await request(id, "tools/call", {
@@ -149,12 +149,20 @@ describe("MCP server", () => {
     try {
       const created = await call(3, { task: "hello", model: "sonnet", effort: "high" });
       expect(created.result?.isError).not.toBe(true);
-      expect(created.result?.structuredContent).toMatchObject({ provider: "claude", text: "fresh answer", usage: { used: 42 } });
-      expect(await readFile(log, "utf8")).toContain("set:model:sonnet\nset:effort:high\nset:mode:acceptEdits");
+      expect(created.result?.structuredContent).toMatchObject({
+        provider: "claude", text: "hello-spike", stopReason: "end_turn",
+        toolCalls: [{ title: "Read" }, { status: "completed" }],
+      });
+      const spawn = JSON.parse((await readFile(log, "utf8")).split("\n")[0]!) as { args: string[]; id: string };
+      expect(spawn.args).toContain("--model");
+      expect(spawn.args).toContain("sonnet");
+      expect(spawn.args).toContain("--effort");
+      expect(spawn.args).toContain("high");
       expect(notifications).toContainEqual(expect.objectContaining({
         method: "notifications/progress", params: expect.objectContaining({ progressToken: 73 }),
       }));
       const sessionId = created.result?.structuredContent?.sessionId;
+      expect(sessionId).toBe(spawn.id);
       expect((await call(4, { task: "again", sessionId })).result?.structuredContent).toMatchObject({ sessionId });
       for (const [requestId, args, code] of [
         [5, { task: "hello", sessionId: "unknown" }, "UNKNOWN_SESSION"],
@@ -164,23 +172,29 @@ describe("MCP server", () => {
           provider: "claude", sessionId: null, error: { code },
         });
       }
-      vi.stubEnv("FAKE_ACP_MODE", "permission");
+      vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "permission-denied-continues");
       const rejected = await call(7, { task: "hello", sessionId });
       expect(rejected.result?.isError).toBe(true);
       expect(rejected.result?.structuredContent).toMatchObject({
-        provider: "claude", sessionId, text: "fresh answer",
-        toolCalls: [{ toolCallId: "tool-1", title: "Fake tool", status: "completed" }],
-        usage: { used: 42 }, error: { code: "PERMISSION_REQUIRED" },
+        provider: "claude", sessionId, text: expect.stringContaining("b.txt"),
+        error: { code: "PERMISSION_REQUIRED", message: expect.stringContaining("Bash") },
       });
-      vi.stubEnv("FAKE_ACP_LOG", join(stateDir, "cancel.log"));
-      vi.stubEnv("FAKE_ACP_MODE", "hang");
+      expect(rejected.result?.structuredContent?.toolCalls).toEqual([
+        { toolCallId: "call_00_FmnQtuplrg74S1JOc49s6145", title: "Bash" },
+        { toolCallId: "call_00_FmnQtuplrg74S1JOc49s6145", status: "failed" },
+        { toolCallId: "toolu_013xEx22fgxQ6QdQhaQr9Kbk", title: "Write" },
+        { toolCallId: "toolu_013xEx22fgxQ6QdQhaQr9Kbk", status: "completed" },
+        { toolCallId: "call_00_FmnQtuplrg74S1JOc49s6145", status: "failed" },
+      ]);
+      vi.stubEnv("FAKE_CLAUDE_LOG", join(stateDir, "cancel.log"));
+      vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", "sigterm-during-tool");
       const delegate = vi.spyOn(ClaudeRunner.prototype, "delegate");
       void call(8, { task: "hang", sessionId });
-      await waitForLog(join(stateDir, "cancel.log"), "prompt:claude-session");
+      await waitForLog(join(stateDir, "cancel.log"), "waiting");
       const outcome = (delegate.mock.results[0]?.value as Promise<unknown>).catch((error: unknown) => error);
       await notify("notifications/cancelled", { requestId: 8, reason: "test" });
       expect(await outcome).toMatchObject({ code: "CANCELLED", partial: { provider: "claude", sessionId } });
-      await waitForLog(join(stateDir, "cancel.log"), "cancel:claude-session");
+      await waitForLog(join(stateDir, "cancel.log"), "root-sigterm");
       const lease = await new SessionStore(stateDir).acquire(cwd);
       await lease.markReaped("no-worker-created");
       await lease.release();

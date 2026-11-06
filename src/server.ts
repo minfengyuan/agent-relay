@@ -146,8 +146,8 @@ const claudeInputSchema = z.object({
   task: z.string().trim().min(1).describe("Task for Claude Code"),
   cwd: z.string().trim().min(1).describe("Existing absolute working directory"),
   sessionId: z.string().trim().min(1).optional().describe("Previously returned Claude Code session ID"),
-  model: z.string().trim().min(1).optional().describe("Claude Code model session option"),
-  effort: z.string().trim().min(1).optional().describe("Claude Code effort session option"),
+  model: z.string().trim().min(1).optional().describe("Claude Code CLI model; omitted preserves the default or restored model"),
+  effort: z.string().trim().min(1).optional().describe("Claude Code CLI effort (low, medium, high, xhigh, or max); omitted preserves the default or restored effort"),
 });
 
 const claudeOutputSchema = outputSchema.extend({
@@ -375,7 +375,7 @@ export function createRelayServer(config: RelayConfig): McpServer {
   registerDelegateTool(server, {
     name: "claude_delegate",
     title: "Delegate a task to Claude Code",
-    description: "Runs one Claude Code ACP prompt with acceptEdits and extra approvals refused; optionally restores a saved session. Native allow rules, hooks, shell networking and external MCP services still apply. No filesystem or network isolation.",
+    description: "Runs one Claude Code headless turn with acceptEdits and automatic denial of permission prompts; denied tools return PERMISSION_REQUIRED after the turn. Optionally restores a saved session. Native allow rules, hooks, shell networking and external MCP services still apply. No filesystem or network isolation.",
     inputSchema: claudeInputSchema,
     outputSchema: claudeOutputSchema,
     run: (input: z.infer<typeof claudeInputSchema>, cwd, signal, progress) => claudeRunner.delegate({

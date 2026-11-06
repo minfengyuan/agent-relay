@@ -25,7 +25,7 @@ Delegate only to an agent the user explicitly mentions (Grok, Cursor, OpenCode, 
 - Use \`opencode_delegate\` for OpenCode implementation work. Optional \`model\`, \`effort\`, and \`agent\` change the live session configuration; omitted fields keep OpenCode's restored or default state.
 - Use \`dsh_delegate\` for DSH implementation work through its headless profile. Optional \`model\` and \`reasoningEffort\` add or change the model route; omitted fields preserve the restored or default route. Pass the returned \`sessionId\` with the same \`cwd\` to resume; the relay does not load or recreate a missing session.
 - Use \`codex_delegate\` for Codex implementation work through its native app-server. Optional \`model\` and \`reasoningEffort\` change the live thread configuration; omitted fields preserve the restored or default state. Pass the returned \`sessionId\` to resume the same thread.
-- Use \`claude_delegate\` for Claude or Claude Code implementation work through its ACP bridge. Optional \`model\` and \`effort\` select advertised session options; omitted fields preserve the restored or default state. Pass the returned \`sessionId\` with the same \`cwd\` to restore the session.
+- Use \`claude_delegate\` for Claude or Claude Code implementation work through the Claude Code CLI headless mode. Optional \`model\` and \`effort\` are CLI arguments; omitted fields preserve the default or restored state. Pass the returned UUID \`sessionId\` with the same \`cwd\` to resume.
 
 When delegating:
 
@@ -38,7 +38,7 @@ When delegating:
 - OpenCode's child \`question: deny\` overlay can be overridden by agent-specific rules. The worker is noninteractive and will time out if it waits for a user; this is not hard isolation.
 - DSH uses \`workspace-write\` and \`--approval-policy never\` on new and resumed turns. On PERMISSION_REQUIRED, DSH recognized a sandbox or auto-review denial after the turn; the model may have continued, so review the partial output and coordinate any policy change before resuming. Do not retry to bypass the rejection. Built-in web tools are disabled, but shell networking and external MCP services remain available; this is not hard filesystem or network isolation. Saved credentials and deployment configuration still apply.
 - Codex uses workspace-write sandboxing with sandbox network access disabled and default temporary-directory access. Extra permissions are refused with PERMISSION_REQUIRED; interactive questions fail with INTERACTION_REQUIRED. Do not retry to bypass these failures. Local Codex authentication and inherited MCP configuration still apply.
-- Claude Code uses \`acceptEdits\` on new and restored sessions. Extra ACP approvals are refused with PERMISSION_REQUIRED; do not retry to bypass the rejection. Native allow rules, hooks, shell networking, and external MCP services still apply. This is not filesystem or network isolation.
+- Claude Code uses \`acceptEdits\` and automatically denies approval-requiring tools. A turn with denials returns PERMISSION_REQUIRED after it finishes; the model may have continued, so review the partial output and do not retry to bypass the rejection. Native allow rules, hooks, shell networking, and external MCP services still apply. This is not filesystem or network isolation.
 - Keep this relay out of downstream agents' MCP configuration to avoid recursive delegation.
 <!-- AGENT-RELAY_END -->`;
 

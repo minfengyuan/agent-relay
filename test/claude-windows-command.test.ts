@@ -10,9 +10,9 @@ useRunnerCleanup(dirs);
 const policy = {
   displayName: "Claude",
   commandEnv: "AGENT_RELAY_CLAUDE_COMMAND",
-  packageName: "@agentclientprotocol/claude-agent-acp",
-  binName: "claude-agent-acp",
-  entryPath: "dist/index.js",
+  packageName: "@anthropic-ai/claude-code",
+  binName: "claude",
+  entryPath: "cli.js",
 };
 
 function shim(entry: string, manager: "npm" | "pnpm") {
@@ -38,10 +38,10 @@ describe("Claude Windows command", () => {
     await writeFile(join(packageRoot, "package.json"), JSON.stringify({
       name: policy.packageName, bin: { [policy.binName]: policy.entryPath },
     }));
-    const command = join(root, "claude-agent-acp.cmd");
-    await writeFile(command, shim(`node_modules\\@agentclientprotocol\\claude-agent-acp\\dist\\index.js`, manager));
+    const command = join(root, "claude.cmd");
+    await writeFile(command, shim(`node_modules\\@anthropic-ai\\claude-code\\cli.js`, manager));
     const env = { PATH: root, PATHEXT: ".exe;.cmd" };
-    expect(resolveWindowsPackageLauncher("claude-agent-acp", policy, env)).toEqual({
+    expect(resolveWindowsPackageLauncher("claude", policy, env)).toEqual({
       command: process.execPath, prefixArgs: [await realpath(entry)],
     });
     vi.spyOn(process, "platform", "get").mockReturnValue("win32");
@@ -53,9 +53,9 @@ describe("Claude Windows command", () => {
       vi.restoreAllMocks();
     }
     await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "wrong-package", bin: { [policy.binName]: policy.entryPath } }));
-    expect(() => resolveWindowsPackageLauncher(command, policy, env)).toThrow("not the bin.claude-agent-acp");
+    expect(() => resolveWindowsPackageLauncher(command, policy, env)).toThrow("not the bin.claude");
     await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: policy.packageName, bin: { [policy.binName]: "dist/other.js" } }));
-    expect(() => resolveWindowsPackageLauncher(command, policy, env)).toThrow("not the bin.claude-agent-acp");
+    expect(() => resolveWindowsPackageLauncher(command, policy, env)).toThrow("not the bin.claude");
   });
 
   it.each(["exe", "com", "js", "mjs"])("supports explicit .%s launchers", async (extension) => {
@@ -71,9 +71,9 @@ describe("Claude Windows command", () => {
   it.each([
     ["bat", "echo arbitrary", ".bat script"],
     ["cmd", "@echo arbitrary", "not a supported"],
-    ["cmd", shim("node_modules\\@agentclientprotocol\\claude-agent-acp\\dist\\index.js", "npm"), "missing entry"],
+    ["cmd", shim("node_modules\\@anthropic-ai\\claude-code\\cli.js", "npm"), "missing entry"],
     ["cmd", shim("node_modules\\other-package\\dist\\index.js", "pnpm"), "not a supported"],
-    ["cmd", shim("%USERPROFILE%\\node_modules\\@agentclientprotocol\\claude-agent-acp\\dist\\index.js", "npm"), "unsupported environment"],
+    ["cmd", shim("%USERPROFILE%\\node_modules\\@anthropic-ai\\claude-code\\cli.js", "npm"), "unsupported environment"],
   ])("rejects invalid launcher %s: %s", async (extension, content, message) => {
     const root = await tempDir(dirs);
     const command = join(root, `bridge.${extension}`);
@@ -83,6 +83,6 @@ describe("Claude Windows command", () => {
 
   it("reports a missing executable with its provider override", async () => {
     const root = await tempDir(dirs);
-    expect(() => resolveWindowsPackageLauncher("claude-agent-acp", policy, { PATH: root })).toThrow("AGENT_RELAY_CLAUDE_COMMAND");
+    expect(() => resolveWindowsPackageLauncher("claude", policy, { PATH: root })).toThrow("AGENT_RELAY_CLAUDE_COMMAND");
   });
 });

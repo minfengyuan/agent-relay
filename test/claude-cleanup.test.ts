@@ -26,14 +26,17 @@ vi.mock("../src/runner/process-tree.js", async (load) => {
 const dirs: string[] = [];
 useRunnerCleanup(dirs);
 
-it.each(["normal", "partial-fail"])("retains the lease when Claude cleanup is unconfirmed after %s", async (mode) => {
+it.each([
+  ["new-session-success", "hello-spike"],
+  ["permission-denied-continues", expect.stringContaining("b.txt")],
+] as const)("retains the lease when Claude cleanup is unconfirmed after %s", async (scenario, text) => {
   const state = await tempDir(dirs);
   const cwd = await tempDir(dirs);
-  vi.stubEnv("FAKE_ACP_MODE", mode);
+  vi.stubEnv("FAKE_CLAUDE_TRANSCRIPT", scenario);
   const store = new SessionStore(state, "claude");
   await expect(new ClaudeRunner(baseConfig(state), store).delegate({ task: "one", cwd })).rejects.toMatchObject({
     code: "PROCESS_CLEANUP_FAILED",
-    partial: { provider: "claude", sessionId: "claude-session", text: "fresh answer" },
+    partial: { provider: "claude", sessionId: expect.any(String), text },
   });
   const locks = (await readdir(store.locksDir)).filter((entry) => entry.endsWith(".lock"));
   expect(locks).toHaveLength(1);

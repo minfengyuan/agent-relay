@@ -1,122 +1,168 @@
-import * as acp from "@agentclientprotocol/sdk";
+import { randomUUID } from "node:crypto";
 import type { RelayConfig } from "../config.js";
 import type { SessionStore } from "../store.js";
 import { RelayFailure, type ClaudeDelegateInput, type ClaudeRelayResult } from "../types.js";
-import { AcpRunner } from "../runner/acp-runner.js";
-import {
-  abortFailure,
-  cancelledPermission,
-  configSelectValues,
-  hasCloseCapability,
-  hasLoadCapability,
-  hasResumeCapability,
-} from "../runner/helpers.js";
-import { boundedString, withTimeout } from "../runner/limits.js";
+import { HeadlessRunner } from "../runner/headless-runner.js";
 import { StandardSummaries } from "../runner/summaries.js";
-import type { ProgressReporter, ProviderAdapter } from "../runner/types.js";
+import type { HeadlessAdapter, HeadlessEvent } from "../runner/types.js";
 import { resolveWindowsPackageLauncher } from "./windows-command.js";
+
+const SESSION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+const BASE_ARGS = [
+  "-p", "--output-format", "stream-json", "--verbose",
+  "--permission-mode", "acceptEdits", "--permission-prompts", "none",
+];
 
 export function claudeSpawnSpec(
   config: RelayConfig,
   env: NodeJS.ProcessEnv = process.env,
 ): { command: string; args: string[] } {
-  const command = config.claudeCommand?.trim() || "claude-agent-acp";
+  const command = config.claudeCommand?.trim() || "claude";
   const args = config.claudeCommandArgs ?? [];
   if (process.platform !== "win32") return { command, args };
   const resolved = resolveWindowsPackageLauncher(command, {
     displayName: "Claude",
     commandEnv: "AGENT_RELAY_CLAUDE_COMMAND",
-    packageName: "@agentclientprotocol/claude-agent-acp",
-    binName: "claude-agent-acp",
-    entryPath: "dist/index.js",
+    packageName: "@anthropic-ai/claude-code",
+    binName: "claude",
+    entryPath: "cli.js",
   }, env);
   return { command: resolved.command, args: [...resolved.prefixArgs, ...args] };
 }
 
-function claudeAdapter(config: RelayConfig): ProviderAdapter<ClaudeDelegateInput, ClaudeRelayResult> {
+function object(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : {};
+}
+
+function string(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function contentBlocks(event: Record<string, unknown>): Record<string, unknown>[] {
+  const content = object(event.message).content;
+  return Array.isArray(content) ? content.map(object) : [];
+}
+
+function resultError(event: Record<string, unknown>): string {
+  const errors = Array.isArray(event.errors) ? event.errors.filter((entry): entry is string => typeof entry === "string") : [];
+  if (errors.length) return errors.join("\n");
+  return string(event.result) || string(event.subtype) || "Claude Code returned an unsuccessful result";
+}
+
+function deniedTools(event: Record<string, unknown>): { names: string; id?: string } | undefined {
+  const denials = Array.isArray(event.permission_denials)
+    ? event.permission_denials.map(object) : [];
+  if (!denials.length) return undefined;
+  const names = denials.map((denial) => string(denial.tool_name) || "unknown").join(", ");
+  const id = string(denials[0]?.tool_use_id);
+  return { names, ...(id ? { id } : {}) };
+}
+
+export function claudeAdapter(config: RelayConfig): HeadlessAdapter<ClaudeDelegateInput, ClaudeRelayResult> {
   return {
-    provider: "claude",
     displayName: "Claude Code",
+    failureCode: "ACP_FAILURE",
     command: () => claudeSpawnSpec(config),
-    authenticate: () => undefined,
-    capabilities: {},
-    prompt: (task) => `This is a noninteractive delegated task. Do not ask the user questions. Resolve minor ambiguity conservatively. If a material decision is unresolved, stop and report it.\n\n${task}`,
-    sessionMetadata: () => ({}),
-    persistNewSessionBeforeConfigure: true,
-    permissionWarning: () => "Claude Code uses acceptEdits and refuses extra ACP approvals. Native allow rules, hooks, shell networking and external MCP services still apply; this is not filesystem or network isolation.",
-    validateInitialized(initialized) {
-      if (!hasCloseCapability(initialized.agentCapabilities)) {
-        throw new RelayFailure("SESSION_CLOSE_UNSUPPORTED", "Claude Code did not advertise session close capability");
+    presetSessionId: (_input, record) => record?.sessionId ?? randomUUID(),
+    prepare: async (input, record) => {
+      if (input.effort !== undefined && !EFFORTS.has(input.effort)) {
+        throw new RelayFailure("INVALID_CONFIG", `Claude Code effort must be one of ${[...EFFORTS].join(", ")}`);
+      }
+      if (record && !SESSION_UUID.test(record.sessionId)) {
+        throw new RelayFailure("UNKNOWN_SESSION", "Claude Code resume requires a recorded UUID");
+      }
+      const extraArgs = [...BASE_ARGS];
+      if (input.model !== undefined) extraArgs.push("--model", input.model);
+      if (input.effort !== undefined) extraArgs.push("--effort", input.effort);
+      extraArgs.push(record ? "--resume" : "--session-id", input.sessionId!);
+      return { env: {}, extraArgs, stdin: { write: input.task } };
+    },
+    decode(raw): HeadlessEvent {
+      const event = object(raw);
+      const hooked = event.type === "system" && string(event.subtype).startsWith("hook_");
+      const session = !hooked && typeof event.session_id === "string" ? { sessionId: event.session_id } : {};
+      switch (event.type) {
+        case "system": {
+          if (event.subtype === "init") {
+            return { type: "session", id: string(event.session_id), ...session };
+          }
+          return { type: "ignore", ...session };
+        }
+        case "assistant": {
+          const blocks = contentBlocks(event);
+          const tool = blocks.find((block) => block.type === "tool_use");
+          if (tool) {
+            return {
+              type: "toolCall", id: string(tool.id), title: string(tool.name), ...session,
+            };
+          }
+          const text = blocks
+            .filter((block) => block.type === "text")
+            .map((block) => string(block.text))
+            .join("");
+          return { type: "text", text, ...session };
+        }
+        case "user": {
+          const result = contentBlocks(event).find((block) => block.type === "tool_result");
+          if (!result) return { type: "ignore", ...session };
+          return {
+            type: "toolResult", id: string(result.tool_use_id),
+            status: result.is_error === true ? "failed" : "completed", ...session,
+          };
+        }
+        case "result": {
+          const denied = deniedTools(event);
+          if (denied) {
+            return {
+              type: "permissionDenied",
+              title: `Claude Code denied tools: ${denied.names}`,
+              ...(denied.id ? { id: denied.id } : {}),
+              ...session,
+            };
+          }
+          const ok = event.is_error === false;
+          const stopReason = string(event.stop_reason) || string(event.subtype) || (ok ? "end_turn" : "error");
+          return {
+            type: "final", ok, stopReason, ...session,
+            ...(typeof event.result === "string" ? { text: event.result } : {}),
+            ...(!ok ? {
+              error: resultError(event),
+              ...(string(event.subtype) ? { errorCode: string(event.subtype) } : {}),
+            } : {}),
+          };
+        }
+        default:
+          return { type: "ignore", ...session };
       }
     },
-    existingSession(initialized) {
-      if (hasResumeCapability(initialized.agentCapabilities)) return "resume";
-      if (hasLoadCapability(initialized.agentCapabilities)) return "load";
-      throw new RelayFailure("RESUME_UNSUPPORTED", "Claude Code did not advertise session resume or loadSession capability");
-    },
-    mapError(error) {
-      if (error instanceof acp.RequestError && error.code === acp.RequestError.authRequired().code) {
-        return new RelayFailure("AUTH_UNAVAILABLE", "Claude Code requires authentication. Sign in outside the relay with the bridge's --cli auth login command, or configure provider credentials.");
+    stderrFailure(tail) {
+      if (tail.includes("Unknown --effort value")) {
+        return new RelayFailure("INVALID_CONFIG", "Claude Code ignored an unknown effort value");
       }
       return undefined;
     },
-    createSummarizer: (limitBytes) => new StandardSummaries(limitBytes, "claude"),
-    handlePermission(params, rt) {
-      if (params.sessionId !== rt.sessionId || rt.signal.aborted || rt.hasFailure()) return cancelledPermission();
-      rt.markRequested();
-      const reject = params.options.find((option) => option.kind === "reject_once");
-      const failure = new RelayFailure(
-        "PERMISSION_REQUIRED",
-        `Claude Code permission was rejected: ${boundedString(params.toolCall.title ?? params.toolCall.toolCallId, 256)}`,
-        rt.partial(),
-      );
-      rt.setFailure(failure);
-      setImmediate(() => rt.abort(failure));
-      return reject
-        ? { outcome: { outcome: "selected" as const, optionId: reject.optionId } }
-        : cancelledPermission();
-    },
-    async configureSession(ctx, sessionId, input, extras, signal) {
-      let options = [...(extras.configOptions ?? [])];
-      const requested = [["model", input.model], ["effort", input.effort], ["mode", "acceptEdits"]] as const;
-      for (const [id, value] of requested) {
-        if (value === undefined) continue;
-        if (signal?.aborted) abortFailure(signal);
-        const option = options.find((entry) => entry.id === id);
-        if (!option) {
-          throw new RelayFailure("CONFIG_UNSUPPORTED", `Claude Code did not advertise the ${id} session option`);
-        }
-        if (!configSelectValues(option).includes(value)) {
-          throw new RelayFailure("INVALID_CONFIG", `Claude Code ${id} value is not available`);
-        }
-        const response = await withTimeout(ctx.request(acp.methods.agent.session.setConfigOption, {
-          sessionId, configId: id, value,
-        }), config.phaseTimeoutMs, "CONFIG_TIMEOUT", `Claude Code ${id} configuration timed out`);
-        if (signal?.aborted) abortFailure(signal);
-        options = [...response.configOptions];
-        if (options.find((entry) => entry.id === id)?.currentValue !== value) {
-          throw new RelayFailure("INVALID_CONFIG", `Claude Code did not apply the requested ${id} value`);
-        }
+    complete(state, exit) {
+      const failure = state.error ?? state.final?.error ?? "";
+      const code = /No conversation found with session ID/i.test(failure) ? "UNKNOWN_SESSION"
+        : /(?:not logged in|not signed in|please log in|please sign in|authentication (?:failed|required)|invalid api key|keychain is locked)/i.test(failure)
+          ? "AUTH_UNAVAILABLE" : "ACP_FAILURE";
+      if (exit.code !== 0 || !state.final?.ok) {
+        throw new RelayFailure(code, failure || `Claude Code exited with ${exit.code ?? exit.signal} without a successful result`);
       }
+      return {
+        provider: "claude", sessionId: state.sessionId, text: state.text,
+        stopReason: state.final.stopReason, truncated: state.truncated,
+      };
     },
-    async finalizeSession(ctx, sessionId) {
-      try {
-        await withTimeout(ctx.request(acp.methods.agent.session.close, { sessionId }),
-          config.phaseTimeoutMs, "SESSION_CLOSE_TIMEOUT", "Claude Code session close timed out");
-      } catch (error) {
-        if (error instanceof RelayFailure) throw error;
-        throw new RelayFailure("SESSION_CLOSE_FAILED", `Claude Code session close failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    },
+    gracefulStop: { signal: "SIGTERM", graceMs: Math.max(5_000, config.cancelGraceMs), waitForExit: true },
+    createSummarizer: (limit) => new StandardSummaries(limit, "claude"),
   };
 }
 
-export class ClaudeRunner extends AcpRunner<ClaudeDelegateInput, ClaudeRelayResult> {
+export class ClaudeRunner extends HeadlessRunner<ClaudeDelegateInput, ClaudeRelayResult> {
   constructor(config: RelayConfig, store: SessionStore) {
     super(config, store, claudeAdapter(config));
-  }
-
-  override delegate(input: ClaudeDelegateInput, signal?: AbortSignal, reportProgress?: ProgressReporter): Promise<ClaudeRelayResult> {
-    return super.delegate(input, signal, reportProgress);
   }
 }

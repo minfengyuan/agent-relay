@@ -23,7 +23,7 @@
 | OpenCode | `opencode_delegate` | 支持可选 model、effort、agent 的编码任务 |
 | DSH | `dsh_delegate` | 通过 DeepSeek Harness 执行编码任务 |
 | Codex | `codex_delegate` | 通过 Codex 原生 app-server 执行编码任务 |
-| Claude Code | `claude_delegate` | 通过 Claude Agent ACP 桥接执行编码任务 |
+| Claude Code | `claude_delegate` | 通过 Claude Code headless CLI 执行编码任务 |
 
 ## 快速开始
 
@@ -69,7 +69,7 @@ node /ABSOLUTE/PATH/agent-relay/dist/cli.js
 }
 ```
 
-Cursor 需要显式配置可执行文件路径。Grok、OpenCode、DSH、Codex 和 Claude Code 默认使用 PATH 中的 `grok`、`opencode`、`dsh`、`codex` 和 `claude-agent-acp`。只需安装并认证实际要调用的 Agent。Claude Code 还需单独安装下文说明的 ACP 桥接程序。
+Cursor 需要显式配置可执行文件路径。Grok、OpenCode、DSH、Codex 和 Claude Code 默认使用 PATH 中的 `grok`、`opencode`、`dsh`、`codex` 和 `claude`。只需安装并认证实际要调用的 Agent。Claude Code 现在直接使用原生 CLI，不再需要单独的 ACP 桥接程序。
 
 relay 使用 stdio，stdout 专用于 MCP 消息。任务默认总超时为一小时；如果客户端支持设置工具调用超时，建议至少设为 3660 秒，并始终高于自定义的 relay 总超时。客户端超时和进度设置方式以各客户端为准。
 
@@ -236,26 +236,32 @@ Relay 运行 `dsh --profile headless`，逐行读取 JSON 事件。Relay 自有�
 
 ### Claude Code
 
-单独安装 ACP 桥接程序；本次接入以 `@agentclientprotocol/claude-agent-acp@0.100.0` 为兼容基线：
+安装并认证 Claude Code CLI。封闭测试的兼容基线为 Claude Code 2.1.318。
 
-```bash
-npm install -g @agentclientprotocol/claude-agent-acp@0.100.0
-claude-agent-acp --cli auth login
+`AGENT_RELAY_CLAUDE_COMMAND` 现在选择 **Claude Code CLI 可执行文件**，默认值为 `claude`。这是破坏性配置变化：仍指向 `claude-agent-acp` 的配置不是有效替代。relay 保留本地 CLI 环境、hooks、skills、plugins、原生允许规则和 MCP 配置；委派期间不会安装软件，也不会启动交互登录。
+
+每次调用使用以下 headless 形式：
+
+```text
+claude -p --output-format stream-json --verbose \
+  --permission-mode acceptEdits --permission-prompts none \
+  [--model MODEL] [--effort EFFORT] \
+  [--session-id UUID | --resume UUID]
 ```
 
-桥接程序使用 Claude Agent SDK 及其附带的原生 Claude 可执行文件，可沿用兼容的本地认证或 provider 环境凭据。需要其他原生可执行文件时，设置上游 `CLAUDE_CODE_EXECUTABLE` 为其绝对路径。`AGENT_RELAY_CLAUDE_COMMAND` 选择的是**桥接程序**，不是原生 `claude` 命令。relay 不在委派时安装软件或启动交互登录。
+任务通过 stdin 传入，不出现在 argv 中。`claude_delegate` 接收 `task`、绝对路径 `cwd`，以及可选的 `sessionId`、`model` 和 `effort`。
 
-`claude_delegate` 接收 `task`、绝对路径 `cwd`，以及可选的 `sessionId`、`model` 和 `effort`。模型和推理强度必须是桥接端公布的 `configOptions` 值；relay 先设置模型再设置 effort，每次更新后刷新选项。省略的选项保持 provider 状态。值无效或选项不可用时，返回 `INVALID_CONFIG` 或 `CONFIG_UNSUPPORTED`。
+relay 在本地按 `low`、`medium`、`high`、`xhigh`、`max` 校验 `effort`；值无效时在启动进程前返回 `INVALID_CONFIG`，因为 Claude 会静默忽略未知 effort。model 没有可靠的本地校验方式：relay 原样传值，行为取决于所配置网关；未知 model 可能成功、被忽略或在运行时失败。
 
-新建和恢复会话后，均在发送任务前显式设置 `acceptEdits`。文件编辑可以直接执行；额外 ACP 审批请求被拒绝，返回 `PERMISSION_REQUIRED` 及可用的部分输出。relay 不声明终端认证、文件/终端服务或问询 UI；基线桥接程序在没有表单支持时禁用 `AskUserQuestion`。原生允许规则、hooks、shell 网络和外部 MCP 服务仍生效；这不构成文件系统或网络隔离。
+会话记录继续使用独立 `claude` 命名空间，并与其他 provider 共用工作目录锁。新会话由 relay 生成 UUID 并通过 `--session-id` 传入，在模型调用前的 `system/init` 到达时持久化。恢复时只把 relay 已记录的 UUID 传给 `--resume`，且必须使用原 `cwd`；不使用标题匹配，未知会话返回 `UNKNOWN_SESSION`，不会创建替代会话。
 
-会话记录使用独立 `claude` 命名空间，与其他 provider 共用工作目录锁。只能在原 `cwd` 恢复 relay 已确认的 ID。优先 resume；仅在未公布 resume 能力时使用 load。恢复失败不新建替代会话。新 ID 在配置前持久化，使配置错误也能返回可恢复 ID。ACP 认证缺失映射为 `AUTH_UNAVAILABLE`；应先在 relay 外完成登录，再使用可用的已确认会话重试。
+`--permission-prompts none` 会自动拒绝需要审批的操作。Claude 在 `result.permission_denials` 中报告这些调用；relay 先完成轮次，再以 `PERMISSION_REQUIRED` 返回可用的文本和有界工具摘要。这与 ACP 行为不同：第一次拒绝不再立即中止，模型可能在某个工具被拒后继续执行其他工作。原生允许规则、hooks、shell 网络和外部 MCP 服务仍生效。`acceptEdits` 不构成文件系统或网络隔离。
 
-桥接端必须公布 `session/close`。relay 关闭会话、确认进程树清理后才释放工作目录锁。结果包含 `provider: "claude"` 和公共结果字段，以及可选的有界工具调用和 ACP usage 摘要。
+只有终止 `result` 的 `is_error: false` 且进程退出码为 `0` 时，轮次才算成功。`error_during_execution`、`error_max_turns`、未知会话、认证失败，以及 SIGTERM 退出 `143` 且没有 `result` 行，都算失败。取消时先发送 SIGTERM，等待最多 5 秒，再确认进程树清理。结果包含 `provider: "claude"`、公共字段和可选的有界 `toolCalls`；CLI 的 token 计数无法映射到 relay 的 `used`/`size` usage 结构，因此省略 `usage`。
 
-Windows 下，受支持的 npm/pnpm `.cmd` 启动脚本会解析为通过包信息与 `bin.claude-agent-acp` 校验的入口，再由 Node 执行，不经过 shell。也支持原生 `.exe`/`.com` 和显式 `.js`/`.mjs`；任意 batch 脚本会被拒绝。
+Windows 下，受支持的 npm/pnpm `.cmd` 启动脚本会解析为通过包信息与 `@anthropic-ai/claude-code` 的 `bin.claude` 校验的入口，再由 Node 执行，不经过 shell。也支持原生 `.exe`/`.com` 和显式 `.js`/`.mjs`；任意 batch 脚本会被拒绝。
 
-真实 smoke 需显式运行 `pnpm test:real:claude`，或 `RUN_CLAUDE_REAL_TESTS=1 pnpm exec vitest run test/claude-real-smoke.test.ts`。可选 `CLAUDE_TEST_MODEL` 和 `CLAUDE_TEST_EFFORT` 验证显式配置。测试在临时工作目录中编辑文件、跨进程恢复会话，并检查锁释放；需要认证且可能消耗模型额度。默认测试使用 fake bridge。
+真实 smoke 需显式运行 `pnpm test:real:claude`，或 `RUN_CLAUDE_REAL_TESTS=1 pnpm exec vitest run test/claude-real-smoke.test.ts`。可选 `CLAUDE_TEST_MODEL` 和 `CLAUDE_TEST_EFFORT` 验证显式 CLI 参数。测试在临时工作目录中编辑文件、跨进程恢复会话，并检查锁释放；需要认证且可能消耗模型额度。默认测试回放已提交的转录。
 
 ### 原生权限策略
 
@@ -268,7 +274,7 @@ relay 使用各 provider 的原生权限控制，各 provider 的能力不同。
 | Cursor | `--sandbox enabled --workspace <cwd>`、`approvalMode: allowlist`、`sandbox.networkAccess: user_config_only`，拒绝 `WebFetch(*)` | 自定义沙箱网络白名单及本地/团队策略仍生效；不等于全面禁网 |
 | OpenCode | 强制 V1 `OPENCODE_PERMISSION` 中的 `question`、`external_directory`、`webfetch`、`websearch` 为 `deny`；两个版本均拒绝额外 ACP 审批 | 不转换为 V2 权限规则，V2 自身配置仍生效；没有 OS 沙箱，shell、插件和外部 MCP 工具仍可能越界写入或联网；V1 外部目录拒绝也限制受支持工具的外部读取 |
 | DSH | headless `--patch` 在新建和恢复轮次中强制 `workspace-write`、`--approval-policy never`，关闭 `web_search`/`web_fetch`，并恢复凭据存储服务 | 文件沙箱不限制 shell 网络；shell 内部拒绝可能没有可识别错误码；Windows ACL 和较旧 Linux Landlock 后端可能仅提供部分文件隔离 |
-| Claude Code | 新建和恢复会话均设置 `acceptEdits`，拒绝额外 ACP 审批 | 不构成文件系统或网络隔离；原生允许规则、hooks、shell 网络与外部 MCP 服务仍生效 |
+| Claude Code | 新建和恢复轮次均使用 `acceptEdits` 与 `--permission-prompts none`；被拒工具在轮次结束后报告 | 不构成文件系统或网络隔离；模型可能在拒绝后继续执行。原生允许规则、hooks、shell 网络与外部 MCP 服务仍生效 |
 
 **OpenCode 行为变化：** 不再通过 `allow_once` 自动授予权限。有 `reject_once` 就选择拒绝，否则取消，并返回带可用部分结果的 `PERMISSION_REQUIRED`。
 
@@ -276,7 +282,7 @@ Cursor 使用 relay 状态目录下的私有 CLI 配置快照。原有 CLI 设�
 
 DSH 接收包含 relay 随包权限 patch 和可选模型 patch 的私有文件，它们紧跟 `--profile headless`，位于应用参数之前。不修改用户 profile；`DSH_PERMISSION_MODE` 仅在子进程环境中设置。原生配置文件在确认进程清理后删除，包括启动失败、取消和超时；无法确认清理时保留文件。配置准备失败会返回结构化错误，不会无约束重试。进程崩溃可能遗留私有目录，只有确认没有工作进程使用时才能删除。
 
-Cursor、OpenCode、DSH 和 Claude Code 每次执行向 stderr 输出一次有长度限制的策略诊断。诊断不包含凭据或任务文本。上述设置不隔离外部 MCP 服务。自定义可执行文件/包装器必须遵守原生参数与配置；替换可执行文件不代表限制已经生效。
+Cursor、OpenCode 和 DSH 每次执行向 stderr 输出一次有长度限制的策略诊断。诊断不包含凭据或任务文本。上述设置不隔离外部 MCP 服务。自定义可执行文件/包装器必须遵守原生参数与配置；替换可执行文件不代表限制已经生效。
 
 策略通过各 provider 自身支持的后端面向 macOS、Linux 和 Windows；relay 能启动 CLI 不代表该平台具备可用沙箱。隔离测试验证配置和拒绝行为，不证明真实 CLI 隔离能力。真实 CLI 验收仍需显式启用：在临时工作区检查内部/外部写入、shell 联网、Web 工具与恢复会话，记录 OS、CLI 版本及实际结果。未执行的平台与能力均标记为未验证。
 
@@ -291,7 +297,7 @@ Cursor、OpenCode、DSH 和 Claude Code 每次执行向 stderr 输出一次有�
 | `AGENT_RELAY_OPENCODE_COMMAND` | `opencode` | OpenCode 可执行文件 |
 | `AGENT_RELAY_DSH_COMMAND` | `dsh` | DSH 可执行文件 |
 | `AGENT_RELAY_CODEX_COMMAND` | `codex` | Codex 原生可执行文件 |
-| `AGENT_RELAY_CLAUDE_COMMAND` | `claude-agent-acp` | Claude ACP 桥接可执行文件 |
+| `AGENT_RELAY_CLAUDE_COMMAND` | `claude` | Claude Code CLI 可执行文件 |
 | `AGENT_RELAY_STATE_DIR` | `~/.local/agent-relay` | 会话元数据及工作目录锁 |
 | `AGENT_RELAY_PHASE_TIMEOUT_MS` | `30000` | 协议阶段超时 |
 | `AGENT_RELAY_TOTAL_TIMEOUT_MS` | `3600000` | 任务总超时 |
