@@ -88,6 +88,12 @@ Codex runs on the protocol-independent `src/runner/worker-host.ts`, which owns a
 
 Both runners register with `src/runner/lifecycle.ts` before acquiring a lease. This module owns the synchronous admission gate, active-task registry, shutdown promise, and cleanup diagnostic aggregation. Existing runner exports remain compatible. Unconfirmed worker cleanup retains the lock and takes precedence over lease and task errors.
 
+### Headless NDJSON execution
+
+`src/runner/headless-runner.ts` adds a provider-neutral driver on `WorkerHost`. Its `HeadlessAdapter` contract in `types.ts` owns command/preparation, stdin policy, event decoding, terminal/exit interpretation, summaries, and graceful-stop signal/grace. Preparation uses a private native-config task directory, retained when process cleanup cannot be confirmed. Provider adapters and server wiring have not migrated to this layer yet.
+
+`ndjson-lines.ts` reads stdout with an 8 MiB per-frame limit and rejects oversized or malformed JSON as `PROTOCOL_MISMATCH`. The runner ignores unknown event types, bounds text and summaries, persists new IDs on a session event (or the first event for a preset ID), and rejects inconsistent IDs. Only relay-recorded IDs appear in partial results or resume commands. Permission denials are reported after the worker finishes, preserving later output. Completion requires a successful terminal event plus adapter validation of the process exit; successful resumes touch their record. Cancellation signals the root and waits within the adapter's grace for a terminal event before the host terminates the process tree.
+
 ### `src/runner/*`: shared execution primitives
 
 - `types.ts` defines `ProviderAdapter`, summarizer, permission runtime, and session configuration extension points.

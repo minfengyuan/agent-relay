@@ -1,5 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk";
-import type { DelegateInput, RelayFailure, RelayResult } from "../types.js";
+import type { DelegateInput, RelayErrorCode, RelayFailure, RelayResult, UsageSummary } from "../types.js";
 import type { SessionRecord } from "../store.js";
 
 export type ProgressReporter = (message: string) => Promise<void> | void;
@@ -42,6 +42,46 @@ export type PreparedSpawn = {
   env: NodeJS.ProcessEnv;
   extraArgs?: string[];
   dispose(): Promise<void>;
+};
+
+export type HeadlessStdin = "ignore" | "close" | { write: string };
+
+export type HeadlessEvent = (
+  | { type: "session"; id: string }
+  | { type: "text"; text: string }
+  | { type: "toolCall"; id: string; title: string }
+  | { type: "toolResult"; id: string; status: string }
+  | { type: "permissionDenied"; id?: string; title: string }
+  | { type: "usage"; usage: UsageSummary }
+  | { type: "final"; stopReason: string; ok: boolean; error?: string }
+  | { type: "error"; message: string }
+  | { type: "ignore" }
+) & { sessionId?: string };
+
+export type HeadlessState<R extends RelayResult> = {
+  sessionId: string | null;
+  text: string;
+  truncated: boolean;
+  final: Extract<HeadlessEvent, { type: "final" }> | undefined;
+  error: string | undefined;
+  permissionDenied: string | undefined;
+  summarizer: ProviderSummarizer<R>;
+};
+
+export type HeadlessExit = { code: number | null; signal: NodeJS.Signals | null };
+
+export type HeadlessAdapter<I extends DelegateInput, R extends RelayResult> = {
+  displayName: string;
+  failureCode: RelayErrorCode;
+  prepare(input: I, record: SessionRecord | undefined, directory: string): Promise<Omit<PreparedSpawn, "dispose"> & {
+    stdin: HeadlessStdin;
+  }>;
+  command(input: I, record?: SessionRecord): { command: string; args: string[] };
+  presetSessionId?(input: I, record?: SessionRecord): string | undefined;
+  decode(event: unknown): HeadlessEvent;
+  complete(state: Readonly<HeadlessState<R>>, exit: HeadlessExit): R;
+  gracefulStop: { signal: NodeJS.Signals; graceMs: number };
+  createSummarizer(limitBytes: number): ProviderSummarizer<R>;
 };
 
 export type ProviderAdapter<I extends DelegateInput, R extends RelayResult> = {

@@ -24,15 +24,16 @@ export type WorkerOptions = {
   sessionId?: string;
   displayName: string;
   failureCode: RelayErrorCode;
-  invocation(): { command: string; args: string[] };
-  prepare?(env: NodeJS.ProcessEnv): Promise<PreparedSpawn>;
+  invocation(record?: SessionRecord): { command: string; args: string[] };
+  prepare?(env: NodeJS.ProcessEnv, record?: SessionRecord): Promise<PreparedSpawn>;
   partial?(record: SessionRecord | undefined): RelayResultPartial;
 };
 
 export type WorkerDriver<T> = WorkerOptions & {
   drive(ctx: WorkerContext): Promise<T>;
   gracefulCancel?(ctx: WorkerContext): Promise<void>;
-  dispose?(): void;
+  cancelGraceMs?: number;
+  dispose?(): Promise<void> | void;
 };
 
 export type HelperResult = { stdout: string; truncated: boolean };
@@ -46,7 +47,6 @@ export class WorkerHost {
       throw new RelayFailure("NESTED_DELEGATION", "Delegation is disabled inside a delegated worker process");
     }
     if (signal?.aborted) throw new RelayFailure("CANCELLED", "MCP request was cancelled");
-    const invocation = options.invocation();
     const abort = new AbortController();
     const cancel = () => abort.abort(new RelayFailure("CANCELLED", "MCP request was cancelled"));
     const aborted = new Promise<never>((_, reject) => {
@@ -84,8 +84,9 @@ export class WorkerHost {
       if (abort.signal.aborted) throw abort.signal.reason;
       record = options.sessionId ? await this.store.read(options.sessionId, options.cwd) : undefined;
       if (abort.signal.aborted) throw abort.signal.reason;
-      prepared = await options.prepare?.({ ...process.env, AGENT_RELAY_DELEGATED: "1" });
+      prepared = await options.prepare?.({ ...process.env, AGENT_RELAY_DELEGATED: "1" }, record);
       if (abort.signal.aborted) throw abort.signal.reason;
+      const invocation = options.invocation(record);
       await lease.markSpawning();
       if (abort.signal.aborted) throw abort.signal.reason;
       worker.state = "pending";
@@ -123,7 +124,7 @@ export class WorkerHost {
       signal?.removeEventListener("abort", cancel);
       try {
         if (abort.signal.aborted && context && options.gracefulCancel) {
-          await withTimeout(options.gracefulCancel(context), this.config.cancelGraceMs,
+          await withTimeout(options.gracefulCancel(context), options.cancelGraceMs ?? this.config.cancelGraceMs,
             "CANCELLED", `${options.displayName} cancellation grace expired`).catch(() => undefined);
         }
         if (lease) {
@@ -150,7 +151,7 @@ export class WorkerHost {
           try { await lease.markOrphaned(); } catch (error) { leaseErrors.push(leaseFailure(error)); }
         }
       } catch (error) { cleanupError = error; }
-      try { options.dispose?.(); } catch (error) { cleanupError = error; }
+      try { await options.dispose?.(); } catch (error) { cleanupError = error; }
       const diagnostics = cleanupDiagnostics(worker.state, termination, leaseErrors, cleanupError, cleanupError !== undefined);
       unregisterActiveTask(task);
       task.resolveSettled({ diagnostics });
