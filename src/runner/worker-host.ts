@@ -28,6 +28,11 @@ export type WorkerOptions = {
   prepare?(env: NodeJS.ProcessEnv, record: SessionRecord | undefined, runHelper: PreparationHelper): Promise<PreparedSpawn>;
   partial?(record: SessionRecord | undefined): RelayResultPartial;
   onStderr?(tail: string): void;
+  /**
+   * The worker exits by itself when its work ends. On Windows its own exit then counts as cleanup,
+   * because descendants of an exited root cannot be found there.
+   */
+  exitsOnCompletion?: boolean;
 };
 
 export type PreparationHelper = (options: {
@@ -71,6 +76,7 @@ type ChildSpec<T> = {
   env: NodeJS.ProcessEnv;
   record: SessionRecord | undefined;
   timeoutMs?: number;
+  exitsOnCompletion: boolean;
   onStderr?(tail: string): void;
   drive(ctx: WorkerContext): Promise<T>;
   gracefulCancel?(ctx: WorkerContext): Promise<void>;
@@ -120,6 +126,7 @@ export class WorkerHost {
       const runHelper: PreparationHelper = (helper) => this.supervise(current, {
         displayName: options.displayName, failureCode: options.failureCode,
         command: helper.command, args: helper.args, env: helper.env, record, timeoutMs: helper.timeoutMs,
+        exitsOnCompletion: true,
         drive: (ctx) => this.driveHelper(ctx, options),
       });
       prepared = await options.prepare?.({ ...process.env, AGENT_RELAY_DELEGATED: "1" }, record, runHelper);
@@ -129,6 +136,7 @@ export class WorkerHost {
         displayName: options.displayName, failureCode: options.failureCode,
         command: invocation.command, args: [...invocation.args, ...(prepared?.extraArgs ?? [])],
         env: prepared?.env ?? process.env, record,
+        exitsOnCompletion: options.exitsOnCompletion === true,
         ...(options.onStderr ? { onStderr: options.onStderr } : {}),
         drive: options.drive,
         ...(options.gracefulCancel ? { gracefulCancel: options.gracefulCancel } : {}),
@@ -175,7 +183,7 @@ export class WorkerHost {
   }
 
   runHelper(options: WorkerOptions, signal?: AbortSignal): Promise<HelperResult> {
-    return this.run({ ...options, drive: (ctx) => this.driveHelper(ctx, options) }, signal);
+    return this.run({ ...options, exitsOnCompletion: true, drive: (ctx) => this.driveHelper(ctx, options) }, signal);
   }
 
   /**
@@ -219,7 +227,7 @@ export class WorkerHost {
           shell: false, stdio: ["pipe", "pipe", "pipe"], ...processTreeSpawnOptions(),
         });
       } catch (error) { worker.state = "failed"; throw error; }
-      tree = createProcessTreeController(child, this.config);
+      tree = createProcessTreeController(child, { ...this.config, acceptRootExit: spec.exitsOnCompletion });
       const spawned = new Promise<void>((resolve, reject) => {
         child.once("spawn", () => { worker.state = "created"; resolve(); });
         child.once("error", (error) => { worker.state = tree!.reference() ? "created" : "failed"; reject(error); });

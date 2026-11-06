@@ -279,7 +279,7 @@ relay 使用各 provider 的原生权限控制，各 provider 的能力不同。
 | Grok | `--sandbox workspace`、`--disable-web-search`、`WebFetch`/`WebSearch` 拒绝规则；沙箱内保留 `--always-approve` | Grok 状态目录和临时目录可写；workspace profile 允许子进程联网；自定义网络限制仅在 Linux 生效，macOS 不等价 |
 | Cursor | `--sandbox enabled --workspace <cwd>`、`approvalMode: allowlist`、`sandbox.networkAccess: user_config_only`，拒绝 `WebFetch(*)` | 自定义沙箱网络白名单及本地/团队策略仍生效；不等于全面禁网 |
 | OpenCode | 强制 V1 `OPENCODE_PERMISSION` 中的 `question`、`external_directory`、`webfetch`、`websearch` 为 `deny`；两个版本均拒绝额外 ACP 审批 | 不转换为 V2 权限规则，V2 自身配置仍生效；没有 OS 沙箱，shell、插件和外部 MCP 工具仍可能越界写入或联网；V1 外部目录拒绝也限制受支持工具的外部读取 |
-| DSH | headless `--patch` 在新建和恢复轮次中强制 `workspace-write`、`--approval-policy never`，关闭 `web_search`/`web_fetch`，并恢复凭据存储服务 | 文件沙箱不限制 shell 网络；shell 内部拒绝可能没有可识别错误码；Windows ACL 和较旧 Linux Landlock 后端可能仅提供部分文件隔离 |
+| DSH | headless `--patch` 在新建和恢复轮次中强制 `workspace-write`、`--approval-policy never`，关闭 `web_search`/`web_fetch`，并恢复凭据存储服务 | 文件沙箱不限制 shell 网络；shell 内部拒绝只能通过 DSH 结果文本标记识别；Windows ACL 和较旧 Linux Landlock 后端可能仅提供部分文件隔离 |
 | Claude Code | 新建和恢复轮次均使用 `acceptEdits` 与 `--permission-prompts none`；被拒工具在轮次结束后报告 | 不构成文件系统或网络隔离；模型可能在拒绝后继续执行。原生允许规则、hooks、shell 网络与外部 MCP 服务仍生效 |
 
 **OpenCode 行为变化：** 不再通过 `allow_once` 自动授予权限。有 `reject_once` 就选择拒绝，否则取消，并返回带可用部分结果的 `PERMISSION_REQUIRED`。
@@ -290,7 +290,7 @@ DSH 接收包含 relay 随包权限 patch 和可选模型 patch 的私有文件�
 
 Cursor、OpenCode 和 DSH 每次执行向 stderr 输出一次有长度限制的策略诊断。诊断不包含凭据或任务文本。上述设置不隔离外部 MCP 服务。自定义可执行文件/包装器必须遵守原生参数与配置；替换可执行文件不代表限制已经生效。
 
-策略通过各 provider 自身支持的后端面向 macOS、Linux 和 Windows；relay 能启动 CLI 不代表该平台具备可用沙箱。隔离测试验证配置和拒绝行为，不证明真实 CLI 隔离能力。真实 CLI 验收仍需显式启用：在临时工作区检查内部/外部写入、shell 联网、Web 工具与恢复会话，记录 OS、CLI 版本及实际结果。未执行的平台与能力均标记为未验证。
+策略通过各 provider 自身支持的后端面向 macOS、Linux 和 Windows；relay 能启动 CLI 不代表该平台具备可用沙箱。隔离测试验证配置和拒绝行为，不证明真实 CLI 隔离能力。Windows 下，Grok、DSH 和 Claude Code 的 headless CLI 在轮次结束时自行退出。由于根进程退出后无法再找到它的后代进程，relay 把 CLI 自行退出视为清理完成；比 CLI 存活更久的后台进程不会被停止。取消和超时在 Windows 上跳过优雅信号，在 CLI 仍运行时用 `taskkill /T /F` 结束整棵进程树。真实 CLI 验收仍需显式启用：在临时工作区检查内部/外部写入、shell 联网、Web 工具与恢复会话，记录 OS、CLI 版本及实际结果。未执行的平台与能力均标记为未验证。
 
 ## 配置
 

@@ -60,6 +60,19 @@ describe("process-tree system-call failures", () => {
     });
   });
 
+  it("accepts a Windows root's own exit only when the worker opts in", async () => {
+    platform("win32"); vi.stubEnv("SystemRoot", "C:\\Windows");
+    const exitedChild = () => Object.assign(fakeChild(), { exitCode: 0 });
+    await expect((await controller(exitedChild())).terminate()).resolves.toMatchObject({
+      confirmed: false, reason: expect.stringContaining("root exited before tree termination"),
+    });
+    const module = await import("../src/runner/process-tree.js");
+    await expect(module.createProcessTreeController(exitedChild() as never, {
+      termGraceMs: 1, killConfirmMs: 10, acceptRootExit: true,
+    }).terminate()).resolves.toEqual({ forced: false, confirmed: true });
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it("returns an unconfirmed result for nonzero taskkill exit", async () => {
     platform("win32"); vi.stubEnv("SystemRoot", "C:\\Windows");
     const helper = fakeChild(); spawnMock.mockReturnValue(helper);

@@ -76,9 +76,13 @@ export class HeadlessRunner<I extends DelegateInput, R extends RelayResult> {
         });
       },
       invocation: (record) => this.adapter.command(effectiveInput, record),
+      exitsOnCompletion: true,
       cancelGraceMs: this.adapter.gracefulStop.graceMs,
       gracefulCancel: async (ctx) => {
         if (ctx.child.exitCode !== null || ctx.child.signalCode !== null) return;
+        // Windows has no graceful signal: kill() ends only the root, and the tree could no longer be found.
+        // Skip it so taskkill /T runs while the root is still alive.
+        if (process.platform === "win32") return;
         ctx.child.kill(this.adapter.gracefulStop.signal);
         if (this.adapter.gracefulStop.waitForExit) await exited;
         else await terminal;
