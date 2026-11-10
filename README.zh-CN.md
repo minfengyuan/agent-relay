@@ -76,13 +76,13 @@ relay 使用 stdio，stdout 专用于 MCP 消息。任务默认总超时为一�
 如使用 Codex，可采用以下可选 TOML 配置：
 
 ```toml
-[mcp_servers.agent_relay]
+[mcp_servers.agent-relay]
 command = "node"
 args = ["/ABSOLUTE/PATH/agent-relay/dist/cli.js"]
 startup_timeout_sec = 10
 tool_timeout_sec = 3660
 
-[mcp_servers.agent_relay.env]
+[mcp_servers.agent-relay.env]
 AGENT_RELAY_CURSOR_COMMAND = "/ABSOLUTE/PATH/TO/cursor-agent"
 ```
 

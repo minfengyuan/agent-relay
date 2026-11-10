@@ -76,13 +76,13 @@ The relay uses stdio, with stdout reserved for MCP messages. Tasks default to a 
 For Codex, an optional TOML configuration is:
 
 ```toml
-[mcp_servers.agent_relay]
+[mcp_servers.agent-relay]
 command = "node"
 args = ["/ABSOLUTE/PATH/agent-relay/dist/cli.js"]
 startup_timeout_sec = 10
 tool_timeout_sec = 3660
 
-[mcp_servers.agent_relay.env]
+[mcp_servers.agent-relay.env]
 AGENT_RELAY_CURSOR_COMMAND = "/ABSOLUTE/PATH/TO/cursor-agent"
 ```
 
