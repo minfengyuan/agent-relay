@@ -13,3 +13,4 @@ export { OpenCodeRunner } from "./adapters/opencode.js";
 export { DshRunner } from "./adapters/dsh.js";
 export { CodexRunner } from "./runner/codex-runner.js";
 export { ClaudeRunner } from "./adapters/claude.js";
+export { AgyRunner } from "./adapters/agy.js";

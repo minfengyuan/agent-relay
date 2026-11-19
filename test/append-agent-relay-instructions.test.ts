@@ -101,6 +101,9 @@ describe("append-agent-relay-instructions", () => {
     expect(first).toContain("Pass the returned UUID `sessionId` with the same `cwd` to resume");
     expect(first).toContain("automatically denies approval-requiring tools");
     expect(first).toContain("returns PERMISSION_REQUIRED after it finishes");
+    expect(first).toContain("`agy_delegate`");
+    expect(first).toContain("through `agy acp`");
+    expect(first).toContain("AGY runs with `--sandbox` and ACP mode `auto` by default");
     expect(first).toContain("INTERACTION_REQUIRED");
     expect(first).toContain("PERMISSION_REQUIRED");
     expect(first).toContain("allow_once");

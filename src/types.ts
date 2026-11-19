@@ -90,6 +90,13 @@ export type ClaudeRelayResult = RelayResultBase & {
   summariesTruncated?: boolean;
 };
 
+export type AgyRelayResult = RelayResultBase & {
+  provider: "agy";
+  toolCalls?: ToolCallSummary[];
+  usage?: UsageSummary;
+  summariesTruncated?: boolean;
+};
+
 export type CodexTokenUsage = {
   totalTokens: number;
   inputTokens: number;
@@ -106,7 +113,7 @@ export type CodexRelayResult = RelayResultBase & {
   summariesTruncated?: boolean;
 };
 
-export type RelayResult = GrokRelayResult | CursorRelayResult | OpenCodeRelayResult | DshRelayResult | CodexRelayResult | ClaudeRelayResult;
+export type RelayResult = GrokRelayResult | CursorRelayResult | OpenCodeRelayResult | DshRelayResult | CodexRelayResult | ClaudeRelayResult | AgyRelayResult;
 
 export type RelayResultPartial =
   | Partial<GrokRelayResult>
@@ -114,7 +121,8 @@ export type RelayResultPartial =
   | Partial<OpenCodeRelayResult>
   | Partial<DshRelayResult>
   | Partial<CodexRelayResult>
-  | Partial<ClaudeRelayResult>;
+  | Partial<ClaudeRelayResult>
+  | Partial<AgyRelayResult>;
 
 type GrokForbiddenExtras =
   | "provider"
@@ -161,6 +169,15 @@ export type CodexDelegateInput = DelegateInput & {
 export type ClaudeDelegateInput = DelegateInput & {
   model?: string;
   effort?: string;
+};
+
+export type AgyMode = "accept-edits" | "auto" | "plan";
+
+export type AgyDelegateInput = DelegateInput & {
+  model?: string;
+  effort?: string;
+  mode?: AgyMode;
+  agent?: string;
 };
 
 export type ToolCallSummary = {

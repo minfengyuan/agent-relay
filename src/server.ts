@@ -2,12 +2,13 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { RelayConfig } from "./config.js";
 import { SessionStore, resolveCwd } from "./store.js";
-import { ClaudeRunner, CodexRunner, CursorRunner, GrokRunner, OpenCodeRunner, type ProgressReporter } from "./runner.js";
+import { AgyRunner, ClaudeRunner, CodexRunner, CursorRunner, GrokRunner, OpenCodeRunner, type ProgressReporter } from "./runner.js";
 import { HeadlessRunner } from "./runner/headless-runner.js";
 import { dshAdapter } from "./adapters/dsh.js";
 import { codexUsageSchema } from "./runner/codex-summaries.js";
 import {
   RelayFailure,
+  type AgyRelayResult,
   type ClaudeRelayResult,
   type CursorRelayResult,
   type CodexRelayResult,
@@ -157,6 +158,23 @@ const claudeOutputSchema = outputSchema.extend({
   summariesTruncated: z.boolean().optional(),
 });
 
+const agyInputSchema = z.object({
+  task: z.string().trim().min(1).describe("Task for AGY"),
+  cwd: z.string().min(1).refine((value) => value.trim().length > 0, "cwd cannot be blank").describe("Existing absolute working directory"),
+  sessionId: z.string().trim().min(1).optional().describe("Previously returned AGY session ID"),
+  model: z.string().trim().min(1).optional().describe("AGY model session option"),
+  effort: z.string().trim().min(1).optional().describe("AGY reasoning effort; mapped to the thought_level session option"),
+  mode: z.enum(["accept-edits", "auto", "plan"]).optional().describe("AGY ACP execution mode; defaults to auto"),
+  agent: z.string().trim().min(1).optional().describe("AGY agent name passed via --agent"),
+});
+
+const agyOutputSchema = outputSchema.extend({
+  provider: z.literal("agy"),
+  toolCalls: toolCallSchema.optional(),
+  usage: usageSchema.optional(),
+  summariesTruncated: z.boolean().optional(),
+});
+
 function toolResult(result: RelayResult, isError = false) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(result) }],
@@ -253,6 +271,7 @@ export function createRelayServer(config: RelayConfig): McpServer {
   const dshRunner = new HeadlessRunner(config, new SessionStore(config.stateDir, "dsh"), dshAdapter(config));
   const codexRunner = new CodexRunner(config, new SessionStore(config.stateDir, "codex"));
   const claudeRunner = new ClaudeRunner(config, new SessionStore(config.stateDir, "claude"));
+  const agyRunner = new AgyRunner(config, new SessionStore(config.stateDir, "agy"));
 
   registerDelegateTool(server, {
     name: "grok_delegate",
@@ -389,6 +408,32 @@ export function createRelayServer(config: RelayConfig): McpServer {
         ? failure.partial : undefined;
       return {
         ...errorFields(failure), provider: "claude",
+        ...(extra?.toolCalls ? { toolCalls: extra.toolCalls } : {}),
+        ...(extra?.usage ? { usage: extra.usage } : {}),
+        ...(extra?.summariesTruncated ? { summariesTruncated: true } : {}),
+      };
+    },
+  });
+
+  registerDelegateTool(server, {
+    name: "agy_delegate",
+    title: "Delegate a task to AGY",
+    description: "Runs one AGY ACP prompt with --sandbox, ACP mode defaulting to auto (accept-edits, auto, or plan), and extra approvals refused; optionally resumes a saved session. Local AGY settings, hooks, skills, plugins, and external MCP services still apply; sandbox enforcement depends on the host platform.",
+    inputSchema: agyInputSchema,
+    outputSchema: agyOutputSchema,
+    run: (input: z.infer<typeof agyInputSchema>, cwd, signal, progress) => agyRunner.delegate({
+      task: input.task, cwd,
+      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+      ...(input.model === undefined ? {} : { model: input.model }),
+      ...(input.effort === undefined ? {} : { effort: input.effort }),
+      ...(input.mode === undefined ? {} : { mode: input.mode }),
+      ...(input.agent === undefined ? {} : { agent: input.agent }),
+    }, signal, progress),
+    toErrorResult: (failure): AgyRelayResult => {
+      const extra = failure.partial && "provider" in failure.partial && failure.partial.provider === "agy"
+        ? failure.partial : undefined;
+      return {
+        ...errorFields(failure), provider: "agy",
         ...(extra?.toolCalls ? { toolCalls: extra.toolCalls } : {}),
         ...(extra?.usage ? { usage: extra.usage } : {}),
         ...(extra?.summariesTruncated ? { summariesTruncated: true } : {}),

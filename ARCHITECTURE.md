@@ -15,7 +15,7 @@ src/cli.ts → src/cli-runtime.ts
 src/server.ts
   │ validated delegate request
   ▼
-  ├─ AcpRunner ────────────────────── Cursor / OpenCode (ACP)
+  ├─ AcpRunner ────────────────────── Cursor / OpenCode / AGY (ACP)
   │    └─ inline lifecycle + lease
   │
   ├─ HeadlessRunner ─┐
@@ -41,6 +41,7 @@ Choose the transport from verified native capabilities before choosing a runner.
 | Codex | native app-server / `CodexRunner` | Persistent threads, bidirectional requests, approvals, and turn interrupts need a native RPC driver. |
 | Cursor | ACP / `AcpRunner` | Print-stream equivalents for interactions/todos/subagents/images are unverified. Print approval/WebFetch behavior is unverified, and it cannot validate ask mode through advertised session modes. A separate spike is required before changing transport. |
 | OpenCode | ACP / `AcpRunner` | Existing capability negotiation, session options, permission refusal, and summaries remain on the supported ACP interface. |
+| AGY | ACP / `AcpRunner` | `agy acp` speaks ACP v1 with `session/resume`, dynamic `model`/`thought_level`/`mode` `configOptions`, and `session/request_permission`. |
 
 ## Layer boundaries
 
@@ -61,7 +62,7 @@ Do not move provider behavior here.
 Responsibilities:
 
 - Define Zod schemas for MCP tool inputs and structured outputs.
-- Register `grok_delegate`, `cursor_delegate`, `opencode_delegate`, `dsh_delegate`, `codex_delegate`, and `claude_delegate`.
+- Register `grok_delegate`, `cursor_delegate`, `opencode_delegate`, `dsh_delegate`, `codex_delegate`, `claude_delegate`, and `agy_delegate`.
 - Resolve and validate `cwd` before execution.
 - Convert runner results and `RelayFailure`s into MCP tool results.
 - Forward MCP cancellation and progress notifications into the runner.
@@ -130,7 +131,7 @@ The optional `stderrFailure(tail)` hook classifies bounded stderr diagnostics wi
 - `types.ts` defines `ProviderAdapter`, `HeadlessAdapter`, summarizer, permission runtime, and session configuration extension points.
 - `worker-host.ts` owns the shared non-ACP worker lifecycle used by native Codex and headless providers.
 - `limits.ts` bounds output and supplies timeout helpers.
-- `summaries.ts` converts high-volume provider updates into bounded structured summaries. Standard usage/tool-call summaries require an explicit provider; `OpenCodeSummaries(limit)` remains a thin `"opencode"` wrapper.
+- `summaries.ts` converts high-volume provider updates into bounded structured summaries. Standard usage/tool-call summaries require an explicit provider (`"opencode"`, `"dsh"`, `"claude"`, or `"agy"`); `OpenCodeSummaries(limit)` remains a thin `"opencode"` wrapper.
 - `helpers.ts` centralizes ACP capability/auth/cancellation helpers.
 
 These modules may know ACP concepts but should remain provider-neutral unless a type is explicitly a provider summary implementation.
@@ -213,23 +214,23 @@ Important consequences:
 - A returned `sessionId` is provider-specific and must be sent back to the same MCP tool/provider.
 - Results and partial errors expose a `sessionId` only after its relay record has been read or written successfully, so any returned ID is eligible for relay resume from its bound `cwd`.
 - A session is tied to the resolved working directory to prevent accidental continuation in another checkout/worktree.
-- Provider options that must remain stable across a session belong in persisted metadata when necessary. Cursor currently persists model/mode semantics; Grok, OpenCode, DSH, and Claude currently do not persist extra adapter metadata.
+- Provider options that must remain stable across a session belong in persisted metadata when necessary. Cursor currently persists model/mode semantics; Grok, OpenCode, DSH, Claude, and AGY currently do not persist extra adapter metadata.
 - ACP capability negotiation decides whether an existing session can be resumed or loaded; headless adapters pass only relay-recorded IDs to native resume flags.
 - DSH persists its new relay record when the headless session event arrives, before prompting. Claude persists its preset UUID when `system/init` arrives, before the model call. Both retain their existing session namespaces for ACP-era compatibility.
 
 ## Provider behavior matrix
 
-| Concern | Grok | Cursor | OpenCode | DSH | Claude |
-| --- | --- | --- | --- | --- | --- |
-| CLI default | `grok --output-format streaming-json` | explicit `AGENT_RELAY_CURSOR_COMMAND` required | `opencode` | `dsh --profile headless` | `claude -p --output-format stream-json` |
-| Authentication | existing CLI credentials; no interactive login | `cursor_login` | `opencode-login` when advertised; no auth request when none advertised | restored bundled credential services, then launch env and `.env` fallback | existing Claude Code CLI login; auth failures map to `AUTH_UNAVAILABLE` |
-| Existing session | recorded UUID via `-r` and `--cwd`; root namespace retained | common load behavior with persisted mode/model checks | prefers ACP resume, falls back to load; `resume: false` forces load | relay-confirmed ID passed as `--session-id`; never load or create a replacement | recorded UUID via `--resume`; `sessions/claude` retained; never create a replacement |
-| Successful completion | non-cancelled `end`, no error event, exit `0`, confirmed cleanup | process cleanup | process cleanup | exit `0` and `final.reason.kind: "completed"` | exit `0` and terminal `result.is_error: false` |
-| Interactive questions | not supported | question requests are skipped; plan approval rejected | V1 question permission denied in child env; V2 ACP cancels questions without client form support | noninteractive; no question channel | noninteractive; approval-requiring tools are denied automatically |
-| Permission request | stderr `permission required:` → UNEXPECTED_PERMISSION | reject once when possible and fail with structured summary | reject once when possible, otherwise cancel; fail with PERMISSION_REQUIRED; never auto-allow | never approvals; recognized denial codes fail after the turn with PERMISSION_REQUIRED | `--permission-prompts none`; `permission_denials` fail after the turn with PERMISSION_REQUIRED |
-| Native file policy | workspace sandbox, including Grok state/temp writes | enabled workspace sandbox with explicit cwd | V1 external-directory permissions denied; no OS sandbox or V2 permission translation | workspace-write patch on every new and resumed turn | `acceptEdits` plus native allow rules; no OS isolation |
-| Native web policy | web search/fetch disabled; child networking allowed | WebFetch denied, user-config-only network rules; custom allowlists apply | V1 webfetch/websearch denied; V2 configuration still applies; shell networking remains possible | web tools disabled; shell networking remains possible | native rules apply; shell networking and external MCP services remain available |
-| Provider summaries | plain text result | tool calls, todos, subagents, interactions, images | usage and tool-call summaries | tool-call summaries; usage omitted | tool-call summaries; usage omitted |
+| Concern | Grok | Cursor | OpenCode | DSH | Claude | AGY |
+| --- | --- | --- | --- | --- | --- | --- |
+| CLI default | `grok --output-format streaming-json` | explicit `AGENT_RELAY_CURSOR_COMMAND` required | `opencode` | `dsh --profile headless` | `claude -p --output-format stream-json` | `agy acp --sandbox` |
+| Authentication | existing CLI credentials; no interactive login | `cursor_login` | `opencode-login` when advertised; no auth request when none advertised | restored bundled credential services, then launch env and `.env` fallback | existing Claude Code CLI login; auth failures map to `AUTH_UNAVAILABLE` | existing `agy` CLI credentials; no `authenticate` call; `-32000` maps to `AUTH_UNAVAILABLE` |
+| Existing session | recorded UUID via `-r` and `--cwd`; root namespace retained | common load behavior with persisted mode/model checks | prefers ACP resume, falls back to load; `resume: false` forces load | relay-confirmed ID passed as `--session-id`; never load or create a replacement | recorded UUID via `--resume`; `sessions/claude` retained; never create a replacement | requires ACP `session/resume`; `sessions/agy` isolated; never falls back to `session/load` |
+| Successful completion | non-cancelled `end`, no error event, exit `0`, confirmed cleanup | process cleanup | process cleanup | exit `0` and `final.reason.kind: "completed"` | exit `0` and terminal `result.is_error: false` | process cleanup |
+| Interactive questions | not supported | question requests are skipped; plan approval rejected | V1 question permission denied in child env; V2 ACP cancels questions without client form support | noninteractive; no question channel | noninteractive; approval-requiring tools are denied automatically | no elicitation/question capability advertised |
+| Permission request | stderr `permission required:` → UNEXPECTED_PERMISSION | reject once when possible and fail with structured summary | reject once when possible, otherwise cancel; fail with PERMISSION_REQUIRED; never auto-allow | never approvals; recognized denial codes fail after the turn with PERMISSION_REQUIRED | `--permission-prompts none`; `permission_denials` fail after the turn with PERMISSION_REQUIRED | active-session prompt requests select `reject_once` or cancel and fail with `PERMISSION_REQUIRED` (late/other-session requests cancel without overwriting `CANCELLED` or active turn) |
+| Native file policy | workspace sandbox, including Grok state/temp writes | enabled workspace sandbox with explicit cwd | V1 external-directory permissions denied; no OS sandbox or V2 permission translation | workspace-write patch on every new and resumed turn | `acceptEdits` plus native allow rules; no OS isolation | `--sandbox` + ACP `mode` (`auto` by default, re-applied on resume); local AGY rules/hooks/plugins still apply |
+| Native web policy | web search/fetch disabled; child networking allowed | WebFetch denied, user-config-only network rules; custom allowlists apply | V1 webfetch/websearch denied; V2 configuration still applies; shell networking remains possible | web tools disabled; shell networking remains possible | native rules apply; shell networking and external MCP services remain available | native AGY/sandbox policy applies; external MCP services remain outside boundary |
+| Provider summaries | plain text result | tool calls, todos, subagents, interactions, images | usage and tool-call summaries | tool-call summaries; usage omitted | tool-call summaries; usage omitted | usage and tool-call summaries |
 
 This table describes current implementation, not a requirement that every future provider behave identically.
 
@@ -255,7 +256,7 @@ Delegated execution must not stall waiting for a human UI. Each provider adapter
 
 The generic runner treats permission state as part of task failure handling so that cancellation, partial output, and cleanup use the same path as other execution failures. Do not add an unbounded user-question wait loop to the runner.
 
-Cursor prepares a private CLI config snapshot; DSH writes a bundled permissions patch and optional model patch into a private task directory and passes them immediately after `--profile headless`. The generic runner owns disposal after confirmed process cleanup and reports disposal failures through cleanup diagnostics. Preparation failure never falls back to unrestricted execution. User configuration, provider session logs, and the session-record format are unchanged. Each ACP adapter emits a bounded static stderr policy warning. These settings express native policy, not uniform OS/network isolation; external MCP services remain outside the boundary. DSH shell networking remains available, and recognised permission signals are limited to the `FS_SANDBOX_DENIED` and `AUTO_REVIEW_DENIED` codes plus the shell sandbox result marker.
+Cursor prepares a private CLI config snapshot; DSH writes a bundled permissions patch and optional model patch into a private task directory and passes them immediately after `--profile headless`. The generic runner owns disposal after confirmed process cleanup and reports disposal failures through cleanup diagnostics. Preparation failure never falls back to unrestricted execution. User configuration, provider session logs, and the session-record format are unchanged. Cursor, OpenCode, DSH, and AGY emit one bounded stderr diagnostic per execution describing policy limits. These settings express native policy, not uniform OS/network isolation; external MCP services remain outside the boundary. DSH shell networking remains available, and recognised permission signals are limited to the `FS_SANDBOX_DENIED` and `AUTO_REVIEW_DENIED` codes plus the shell sandbox result marker.
 
 Native Codex also disables built-in web search in thread start/resume configuration. Its per-turn sandbox network denial remains separate from model/API traffic.
 

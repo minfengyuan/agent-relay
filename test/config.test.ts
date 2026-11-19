@@ -40,6 +40,13 @@ describe("loadConfig", () => {
     expect(loadConfig({ AGENT_RELAY_DSH_COMMAND: "   " }).dshCommand).toBe("dsh");
   });
 
+  it("defaults to agy and trims an explicit command without an args env", () => {
+    expect(loadConfig({}).agyCommand).toBe("agy");
+    expect(loadConfig({}).agyCommandArgs).toBeUndefined();
+    expect(loadConfig({ AGENT_RELAY_AGY_COMMAND: "  /bin/agy  " }).agyCommand).toBe("/bin/agy");
+    expect(loadConfig({ AGENT_RELAY_AGY_COMMAND: "   " }).agyCommand).toBe("agy");
+  });
+
   it("extracts flat and grouped OpenCode-style select values", () => {
     const flat = {
       id: "model",
@@ -62,13 +69,16 @@ describe("loadConfig", () => {
     expect(configSelectValues({ id: "x", name: "X", type: "boolean", currentValue: true } as acp.SessionConfigOption)).toEqual([]);
   });
 
-  it("keeps OpenCodeSummaries constructor compatible and requires an explicit DSH provider", () => {
+  it("keeps OpenCodeSummaries constructor compatible and requires an explicit DSH/AGY provider", () => {
     const open = new OpenCodeSummaries(1024);
     open.onToolCall({ toolCallId: "t1", title: "Tool" });
     expect(open.result().provider).toBe("opencode");
     const dsh = new StandardSummaries(1024, "dsh");
     dsh.onToolCall({ toolCallId: "t1", title: "Tool" });
     expect(dsh.result().provider).toBe("dsh");
+    const agy = new StandardSummaries(1024, "agy");
+    agy.onToolCall({ toolCallId: "t1", title: "Tool" });
+    expect(agy.result().provider).toBe("agy");
   });
 
   it("reads AGENT_RELAY_* config keys", () => {

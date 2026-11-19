@@ -5,7 +5,7 @@ import type { PreparationHelper } from "./worker-host.js";
 
 export type ProgressReporter = (message: string) => Promise<void> | void;
 
-export type Provider = "grok" | "cursor" | "opencode" | "dsh" | "claude";
+export type Provider = "grok" | "cursor" | "opencode" | "dsh" | "claude" | "agy";
 export type ExistingSessionAction = "resume" | "load";
 
 export type ToolCallUpdate = {

@@ -116,6 +116,16 @@ When changing an existing adapter, walk through the contract in this order:
 - Windows launchers use `windows-command.ts` with `@anthropic-ai/claude-code`, `bin.claude`, and `cli.js`. Keep the DSH resolver wrapper compatible.
 - Summaries use `StandardSummaries` with provider `"claude"`. Return tool calls; omit usage because CLI token counters do not map to the relay's `used`/`size` shape.
 
+### AGY
+
+- Command defaults to `agy` (`AGENT_RELAY_AGY_COMMAND`) and launches `acp --sandbox`, appending `--agent <name>` when `agent` is supplied.
+- Use existing `agy` CLI authentication (`authenticate()` returns `undefined`); never invoke interactive browser OAuth (`oauth-personal`) or auto-select `gemini-api-key` over OAuth. Map JSON-RPC `-32000` (`acp.RequestError.authRequired().code`) to `AUTH_UNAVAILABLE`.
+- Do not advertise `fs`, `terminal`, `elicitation`, or `terminal-auth` client capabilities.
+- Existing sessions must use ACP `session/resume` (`RESUME_UNSUPPORTED` when unadvertised); never fall back to `session/load`, which creates an empty session on unknown IDs in `agy acp`.
+- Configure `model`, `thought_level` (from `effort`), and `mode` (defaulting to `"auto"`) in order, refreshing `configOptions` after each call and verifying all requested values remain applied in the final snapshot (`INVALID_CONFIG` if ignored or reset). Always set `mode` on both new and resumed turns because `agy acp` resets mode to `"default"` across processes.
+- Reject active-session ACP permission requests during the prompt via `reject_once` when offered, otherwise cancel, and fail with `PERMISSION_REQUIRED` (even if the prompt RPC rejects before the deferred abort runs). Cancel late post-cancel or other-session requests without overwriting `CANCELLED` or failing the active turn. Never select `allow_once` or `allow_always`.
+- Usage and tool-call summaries use `StandardSummaries` with provider `"agy"`. Keep sessions in the isolated `sessions/agy` namespace while sharing per-`cwd` locks.
+
 ## Adding a provider
 
 Choose the transport before the runner. Verify event/terminal semantics, session compatibility, permission behavior, and graceful child cleanup against a pinned CLI version. Use `AcpRunner` for ACP, `HeadlessRunner` for a one-way NDJSON event stream with a terminal event, or a dedicated driver on `WorkerHost` for native bidirectional RPC. Do not infer print-mode parity from the presence of a JSON flag: Cursor stays on ACP because equivalent extension summaries, approval behavior, and ask-mode validation are unverified. See [`ARCHITECTURE.md`](../../ARCHITECTURE.md) for the transport decision and S1–S3 evidence.

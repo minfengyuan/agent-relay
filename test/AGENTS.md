@@ -38,6 +38,7 @@ pnpm test:real:opencode
 pnpm test:real:dsh
 pnpm test:real:codex
 pnpm test:real:claude
+pnpm test:real:agy
 ```
 
 Run these only when the corresponding CLI is installed/authenticated and the change needs verification against a real implementation. A missing real-provider environment is not a reason to weaken or skip hermetic coverage.
@@ -57,6 +58,7 @@ Use the narrowest test file that owns the behavior:
 - `grok-runner.test.ts` — Grok headless transcript replay, UUID sessions, stderr permissions, and graceful shutdown.
 - `cursor-runner.test.ts` — Cursor adapter behavior.
 - `opencode-runner.test.ts` — OpenCode adapter behavior.
+- `agy-runner.test.ts` — AGY adapter behavior.
 - `dsh-runner.test.ts` — DSH adapter behavior.
 - `dsh-windows-command.test.ts` — verified DSH npm/pnpm launchers without shell execution.
 - `codex-runner.test.ts` — native Codex protocol, session, permission, and lifecycle behavior.

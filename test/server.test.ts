@@ -1,14 +1,14 @@
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
-import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { cleanupAllChildren, ClaudeRunner, CodexRunner } from "../src/runner.js";
+import { cleanupAllChildren, AgyRunner, ClaudeRunner, CodexRunner } from "../src/runner.js";
 import { createRelayServer } from "../src/server.js";
 import { RelayFailure } from "../src/types.js";
 import { SessionStore } from "../src/store.js";
-import { claudeFixture, clearDelegatedEnv, codexFixture, dshFixture, grokHeadlessFixture, opencodeFixture, waitForLog } from "./helpers.js";
+import { agyFixture, claudeFixture, clearDelegatedEnv, codexFixture, dshFixture, grokHeadlessFixture, opencodeFixture, waitForLog } from "./helpers.js";
 
 const dirs: string[] = [];
 beforeEach(() => {
@@ -66,7 +66,7 @@ describe("MCP server", () => {
     try {
       expect(init).toHaveProperty("result.serverInfo.name", "agent-relay");
       const discovery = await request(2, "tools/list") as { result?: { tools?: unknown[] } };
-      expect(discovery.result?.tools).toHaveLength(6);
+      expect(discovery.result?.tools).toHaveLength(7);
       const response = await request(3, "tools/call", {
         name: "grok_delegate", arguments: { task: "hello", cwd: process.cwd() },
       }) as { result?: { isError?: boolean; content?: Array<{ text?: string }>; structuredContent?: unknown } };
@@ -92,7 +92,7 @@ describe("MCP server", () => {
       } finally { await clientTransport.close(); await server.close(); }
     },
   );
-  it("discovers all six providers with their input contracts", async () => {
+  it("discovers all seven providers with their input contracts", async () => {
     const { server, clientTransport, request, init } = await harness();
     expect(init).toHaveProperty("result.serverInfo.name", "agent-relay");
     const response = await request(2, "tools/list");
@@ -126,6 +126,14 @@ describe("MCP server", () => {
     expect(response).toHaveProperty("result.tools.5.inputSchema.properties.effort");
     expect(response).not.toHaveProperty("result.tools.5.inputSchema.properties.permissionMode");
     expect(response).toHaveProperty("result.tools.5.outputSchema.properties.provider.const", "claude");
+    expect(response).toHaveProperty("result.tools.6.name", "agy_delegate");
+    expect(response).toHaveProperty("result.tools.6.inputSchema.required", ["task", "cwd"]);
+    expect(response).toHaveProperty("result.tools.6.inputSchema.properties.sessionId");
+    expect(response).toHaveProperty("result.tools.6.inputSchema.properties.model");
+    expect(response).toHaveProperty("result.tools.6.inputSchema.properties.effort");
+    expect(response).toHaveProperty("result.tools.6.inputSchema.properties.mode.enum", ["accept-edits", "auto", "plan"]);
+    expect(response).toHaveProperty("result.tools.6.inputSchema.properties.agent");
+    expect(response).toHaveProperty("result.tools.6.outputSchema.properties.provider.const", "agy");
     await clientTransport.close();
     await server.close();
   });
@@ -569,4 +577,115 @@ describe("MCP server", () => {
     await clientTransport.close();
     await server.close();
   }, 15_000);
+
+  it("forwards AGY options, progress, whitespace rejection, partial errors, and cancellation", async () => {
+    const cwd = await realpath(await mkdtemp(join(tmpdir(), "relay-server-agy-")));
+    dirs.push(cwd);
+    const { server, clientTransport, request, notify, notifications, stateDir } = await harness({
+      agyCommand: process.execPath, agyCommandArgs: [agyFixture], cancelGraceMs: 100, progressIntervalMs: 1,
+    });
+    const log = join(stateDir, "agy.log");
+    vi.stubEnv("FAKE_ACP_LOG", log);
+    type Response = { result?: { isError?: boolean; content?: Array<{ text: string }>; structuredContent?: Record<string, unknown> }; error?: { message?: string } };
+    const call = async (id: number, args: Record<string, unknown>) => {
+      const response = await request(id, "tools/call", {
+        name: "agy_delegate", arguments: { cwd, ...args }, _meta: { progressToken: "agy-progress" },
+      }) as Response;
+      expect(JSON.parse(response.result?.content?.[0]?.text ?? "null")).toEqual(response.result?.structuredContent);
+      return response;
+    };
+    const delegateValidationSpy = vi.spyOn(AgyRunner.prototype, "delegate");
+    const invalid = async (id: number, arguments_: Record<string, unknown>) => {
+      const response = await request(id, "tools/call", {
+        name: "agy_delegate", arguments: { cwd, ...arguments_ },
+      }) as Response;
+      expect(response.result?.isError === true || response.error !== undefined).toBe(true);
+      expect(response.result?.structuredContent).toBeUndefined();
+      const message = response.result?.content?.[0]?.text ?? response.error?.message ?? "";
+      expect(message).toMatch(/validation|invalid|blank|too_small/i);
+      expect(delegateValidationSpy).not.toHaveBeenCalled();
+    };
+    try {
+      for (const [id, args] of [
+        [20, { task: "   " }],
+        [21, { task: "ok", cwd: "   " }],
+        [22, { task: "ok", sessionId: "   " }],
+        [23, { task: "ok", model: "   " }],
+        [24, { task: "ok", effort: "   " }],
+        [25, { task: "ok", agent: "   " }],
+      ] as const) {
+        await invalid(id, args);
+      }
+      delegateValidationSpy.mockRestore();
+
+      const created = await call(3, {
+        task: "hello", model: "gemini-4-neon", effort: "high", mode: "accept-edits", agent: "coder",
+      });
+      expect(created.result?.isError).not.toBe(true);
+      expect(created.result?.structuredContent).toMatchObject({
+        provider: "agy", text: "fresh answer", stopReason: "end_turn",
+        usage: { used: 42, size: 128, cost: { amount: 3.5, currency: "USD" } },
+        toolCalls: [expect.objectContaining({ toolCallId: "t1", title: "Fake tool" })],
+      });
+      const events = await readFile(log, "utf8");
+      expect(events).toContain(',"acp","--sandbox","--agent","coder"]');
+      expect(events).toContain("set-config:model:gemini-4-neon");
+      expect(events).toContain("set-config:thought_level:high");
+      expect(events).toContain("set-config:mode:accept-edits");
+      expect(notifications).toContainEqual(expect.objectContaining({
+        method: "notifications/progress", params: expect.objectContaining({ progressToken: "agy-progress" }),
+      }));
+
+      const sessionId = created.result?.structuredContent?.sessionId;
+      expect(sessionId).toBe("fake-session-1");
+      expect((await call(4, { task: "again", sessionId })).result?.structuredContent).toMatchObject({ sessionId });
+
+      for (const [requestId, args, code] of [
+        [5, { task: "hello", sessionId: "unknown" }, "UNKNOWN_SESSION"],
+        [6, { task: "hello", cwd: "relative", sessionId }, "INVALID_CWD"],
+      ] as const) {
+        expect((await call(requestId, args)).result?.structuredContent).toMatchObject({
+          provider: "agy", sessionId: null, error: { code },
+        });
+      }
+
+      vi.stubEnv("FAKE_ACP_MODE", "permission");
+      const rejected = await call(7, { task: "permission", sessionId });
+      expect(rejected.result?.isError).toBe(true);
+      expect(rejected.result?.structuredContent).toMatchObject({
+        provider: "agy", sessionId, error: { code: "PERMISSION_REQUIRED" },
+      });
+
+      if (process.platform !== "win32") {
+        const spacedCwd = join(cwd, "dir-space ");
+        await mkdir(spacedCwd);
+        const spacedLog = join(stateDir, "agy-spaced.log");
+        vi.stubEnv("FAKE_ACP_LOG", spacedLog);
+        vi.stubEnv("FAKE_ACP_MODE", "normal");
+        vi.stubEnv("FAKE_SESSION_ID", "spaced-session");
+        const spaced = await call(9, { task: "preserve trailing space", cwd: spacedCwd });
+        expect(spaced.result?.isError).not.toBe(true);
+        expect(spaced.result?.structuredContent).toMatchObject({ provider: "agy", sessionId: "spaced-session" });
+        expect(await readFile(spacedLog, "utf8")).toContain(`process-cwd:${spacedCwd}`);
+        vi.stubEnv("FAKE_SESSION_ID", "fake-session-1");
+      }
+
+      vi.stubEnv("FAKE_ACP_LOG", join(stateDir, "agy-cancel.log"));
+      vi.stubEnv("FAKE_ACP_MODE", "hang");
+      const delegate = vi.spyOn(AgyRunner.prototype, "delegate");
+      void call(8, { task: "hang", sessionId });
+      await waitForLog(join(stateDir, "agy-cancel.log"), "prompt:fake-session-1");
+      const outcome = (delegate.mock.results[0]?.value as Promise<unknown>).catch((error: unknown) => error);
+      await notify("notifications/cancelled", { requestId: 8, reason: "test" });
+      expect(await outcome).toMatchObject({ code: "CANCELLED", partial: { provider: "agy", sessionId } });
+      await waitForLog(join(stateDir, "agy-cancel.log"), "cancel:fake-session-1");
+      await cleanupAllChildren();
+      const lease = await new SessionStore(stateDir, "agy").acquire(cwd);
+      await lease.markReaped("no-worker-created");
+      await lease.release();
+    } finally {
+      await clientTransport.close();
+      await server.close();
+    }
+  });
 });

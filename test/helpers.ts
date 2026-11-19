@@ -61,6 +61,7 @@ export const opencodeFixture = join(fixtures, "fake-opencode-agent.mjs");
 export const dshFixture = join(fixtures, "fake-dsh-headless.mjs");
 export const codexFixture = join(fixtures, "fake-codex-server.mjs");
 export const claudeFixture = join(fixtures, "fake-claude-headless.mjs");
+export const agyFixture = join(fixtures, "fake-agy-agent.mjs");
 export const backpressureFixture = join(fixtures, "backpressure-agent.mjs");
 
 export async function tempDir(dirs: string[], prefix = "relay-"): Promise<string> {
@@ -92,6 +93,8 @@ export function baseConfig(stateDir: string, overrides: Partial<RelayConfig> = {
     codexCommandArgs: [codexFixture],
     claudeCommand: process.execPath,
     claudeCommandArgs: [claudeFixture],
+    agyCommand: process.execPath,
+    agyCommandArgs: [agyFixture],
     stateDir,
     phaseTimeoutMs: 2_000,
     totalTimeoutMs: 15_000,

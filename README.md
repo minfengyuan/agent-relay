@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Run **Grok**, **Cursor**, **OpenCode**, **DSH**, **Codex**, and **Claude Code** through one local MCP server from any MCP client that supports stdio.
+Run **Grok**, **Cursor**, **OpenCode**, **DSH**, **Codex**, **Claude Code**, and **AGY** through one local MCP server from any MCP client that supports stdio.
 
 `agent-relay` bridges MCP tool calls to local coding agents through ACP, the native Codex app-server, or a provider's headless JSON transport. The calling client handles orchestration and review; the relay runs one non-interactive agent turn and returns bounded output together with a resumable session ID.
 
@@ -24,6 +24,7 @@ Run **Grok**, **Cursor**, **OpenCode**, **DSH**, **Codex**, and **Claude Code** 
 | DSH | `dsh_delegate` | Coding tasks through DeepSeek Harness |
 | Codex | `codex_delegate` | Coding tasks through the native Codex app-server |
 | Claude Code | `claude_delegate` | Coding tasks through the Claude Code headless CLI |
+| AGY | `agy_delegate` | Coding tasks through Antigravity CLI ACP with optional model/effort/mode/agent |
 
 ## Quick start
 
@@ -69,7 +70,7 @@ For clients using an `mcpServers` JSON configuration, the following is an exampl
 }
 ```
 
-Cursor requires an explicit executable path. Grok, OpenCode, DSH, Codex, and Claude Code default to `grok`, `opencode`, `dsh`, `codex`, and `claude` on PATH. You only need to install and authenticate the agents you intend to call. Claude Code now uses its native CLI; the separate ACP bridge is no longer needed.
+Cursor requires an explicit executable path. Grok, OpenCode, DSH, Codex, Claude Code, and AGY default to `grok`, `opencode`, `dsh`, `codex`, `claude`, and `agy` on PATH. You only need to install and authenticate the agents you intend to call. Claude Code now uses its native CLI; the separate ACP bridge is no longer needed.
 
 The relay uses stdio, with stdout reserved for MCP messages. Tasks default to a one-hour total timeout. Set the client's tool-call timeout to at least 3660 seconds when available, and keep it above any custom relay total timeout. Client timeout and progress settings are client-specific.
 
@@ -141,6 +142,8 @@ Delegate this implementation task to DSH in /path/to/worktree.
 Delegate this implementation task to Codex in /path/to/worktree.
 
 Delegate this implementation task to Claude Code in /path/to/worktree.
+
+Delegate this implementation task to AGY in /path/to/worktree.
 ```
 
 Each tool takes a `task` and an absolute `cwd`. Pass a returned `sessionId` to the same tool with the same working directory to continue that provider's session. Optional provider-specific inputs are exposed through MCP tool discovery.
@@ -150,7 +153,7 @@ Calling client chooses a task and worktree
         ↓
 agent-relay executes one provider turn
         ↓
-Grok / Cursor / OpenCode / DSH / Codex / Claude Code works locally
+Grok / Cursor / OpenCode / DSH / Codex / Claude Code / AGY works locally
         ↓
 Calling client reviews the result, diff, and tests
         ↓
@@ -269,6 +272,18 @@ On Windows, supported npm/pnpm `.cmd` shims are resolved to a verified `@anthrop
 
 Run the opt-in authenticated smoke with `pnpm test:real:claude` (or `RUN_CLAUDE_REAL_TESTS=1 pnpm exec vitest run test/claude-real-smoke.test.ts`). Optional `CLAUDE_TEST_MODEL` and `CLAUDE_TEST_EFFORT` exercise explicit CLI arguments. The smoke uses a disposable workspace, edits files, restores the conversation across processes, and checks lock release. It requires authentication and may consume model allowance; default tests replay committed transcripts.
 
+### AGY
+
+Install and authenticate the Antigravity CLI (`agy`). The hermetic integration baseline is `agy 1.5.12`.
+
+The relay launches `agy acp --sandbox [--agent AGENT]` over stdio NDJSON and uses existing CLI authentication (`agy` or `agy acp --login`); it does not invoke interactive OAuth during delegation. Missing credentials return `AUTH_UNAVAILABLE`. Use `AGENT_RELAY_AGY_COMMAND` to select another executable.
+
+Inputs are `task`, absolute `cwd`, and optional `sessionId`, `model`, `effort`, `mode` (`accept-edits`, `auto`, or `plan`), and `agent`. Existing sessions use ACP `session/resume` in the `sessions/agy` namespace and original `cwd`, without falling back to `session/load` or creating a replacement session.
+
+On both new and resumed turns, the relay configures advertised session options in order: `model`, then `thought_level` (from `effort`), then `mode` (defaulting to `auto`). `agy acp` resets session mode to `default` across process restarts, so `mode` is explicitly applied on every turn and all requested options are verified against the final response. Active-session ACP permission requests during the prompt are refused (`reject_once` when offered, otherwise cancelled) and fail with `PERMISSION_REQUIRED` while retaining partial output; late post-cancel requests preserve `CANCELLED` and other-session requests are cancelled without failing the active turn. Results include `provider: "agy"` and bounded `toolCalls` and `usage` summaries.
+
+Run the opt-in authenticated smoke with `pnpm test:real:agy` (or `RUN_AGY_REAL_TESTS=1 pnpm exec vitest run test/agy-real-smoke.test.ts`).
+
 ### Native permission policy
 
 The relay applies provider-specific native permission controls. These controls are not equivalent across providers. Extra ACP/native approval requests are refused; Grok's unexpected requests fail instead of opening an interactive approval flow.
@@ -281,6 +296,7 @@ The relay applies provider-specific native permission controls. These controls a
 | OpenCode | Forces V1 `OPENCODE_PERMISSION` entries `question`, `external_directory`, `webfetch`, and `websearch` to `deny`; refuses extra ACP approvals in both versions | No V2 permission translation; V2's own configuration still applies. No OS sandbox: shell, plugins and external MCP tools can write outside the workspace or use the network. V1 external-directory denial also restricts supported external reads |
 | DSH | Headless `--patch` enforces `workspace-write`, `--approval-policy never`, and disabled `web_search`/`web_fetch` on new and resumed turns; credential-store services are restored | The file sandbox does not restrict shell networking. Shell-internal denials are detected only from DSH's result marker text. Windows ACL and older Linux Landlock backends may provide partial file enforcement |
 | Claude Code | `acceptEdits` plus `--permission-prompts none` on new and resumed turns; denied tools are reported after the turn | No filesystem or network isolation; the model may continue after a denial. Native allow rules, hooks, shell networking and external MCP services still apply |
+| AGY | `agy acp --sandbox` plus ACP `mode` (`auto` by default, re-applied on resume); active-session permission requests during the prompt are refused with `PERMISSION_REQUIRED` | Local AGY settings, hooks, skills, plugins, and external MCP services still apply; sandbox enforcement depends on the host platform |
 
 **OpenCode behavior change:** permission requests are no longer automatically granted with `allow_once`. The relay selects `reject_once` when offered, otherwise cancels, and returns `PERMISSION_REQUIRED` with available partial output.
 
@@ -288,7 +304,7 @@ Cursor uses a private snapshot of its CLI configuration under the relay state di
 
 DSH receives private files containing the relay's bundled native and optional model patches. They are passed immediately after `--profile headless`, before application flags. User profiles are not edited; `DSH_PERMISSION_MODE` is set only in the child environment. Native configuration files are removed after confirmed process cleanup, including startup failure, cancellation and timeout; they are retained if cleanup cannot be confirmed. Preparation errors fail structurally without an unrestricted retry. A process crash may leave private directories behind; remove them only after confirming no worker still uses them.
 
-Cursor, OpenCode, and DSH emit one bounded stderr diagnostic per execution describing policy limits. Diagnostics contain no credentials or task text. External MCP services are not isolated by these settings. Custom executables/wrappers must honor native arguments and configuration; overriding the executable is not proof of enforcement.
+Cursor, OpenCode, DSH, and AGY emit one bounded stderr diagnostic per execution describing policy limits. Diagnostics contain no credentials or task text. External MCP services are not isolated by these settings. Custom executables/wrappers must honor native arguments and configuration; overriding the executable is not proof of enforcement.
 
 The policy targets macOS, Linux and Windows through each provider's supported backends; launcher support does not prove sandbox availability. Hermetic tests verify configuration and refusal behavior, not real CLI isolation. On Windows, the Grok, DSH, and Claude Code headless CLIs exit by themselves when a turn ends. The relay then counts the CLI's own exit as cleanup, because the descendants of an exited root cannot be found; a background process that outlives the CLI is not stopped. Cancellation and timeout skip the graceful signal on Windows and stop the whole tree with `taskkill /T /F` while the CLI is still running. Real CLI checks remain opt-in: use a disposable workspace to check internal/external writes, shell networking, web tools and resumed sessions, recording the OS, CLI version and observed result. Unrun platforms and capabilities remain unverified.
 
@@ -304,6 +320,7 @@ Set these environment variables on the MCP server process:
 | `AGENT_RELAY_DSH_COMMAND` | `dsh` | DSH executable |
 | `AGENT_RELAY_CODEX_COMMAND` | `codex` | Native Codex executable |
 | `AGENT_RELAY_CLAUDE_COMMAND` | `claude` | Claude Code CLI executable |
+| `AGENT_RELAY_AGY_COMMAND` | `agy` | Antigravity CLI executable |
 | `AGENT_RELAY_STATE_DIR` | `~/.local/agent-relay` | Session metadata and workspace locks |
 | `AGENT_RELAY_PHASE_TIMEOUT_MS` | `30000` | Protocol phase timeout |
 | `AGENT_RELAY_TOTAL_TIMEOUT_MS` | `3600000` | Total task timeout |

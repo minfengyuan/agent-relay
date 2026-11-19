@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-通过一个本地 MCP Server，让任何支持 stdio 的 MCP 客户端调用 **Grok**、**Cursor**、**OpenCode**、**DSH**、**Codex** 和 **Claude Code**。
+通过一个本地 MCP Server，让任何支持 stdio 的 MCP 客户端调用 **Grok**、**Cursor**、**OpenCode**、**DSH**、**Codex**、**Claude Code** 和 **AGY**。
 
 `agent-relay` 将 MCP 工具调用桥接到本地 Coding Agent，使用 ACP、Codex 原生 app-server 或 provider 的 headless JSON 传输。调用方负责统一编排和结果审查；relay 执行一轮非交互任务，返回有大小限制的输出和可继续使用的会话 ID。
 
@@ -24,6 +24,7 @@
 | DSH | `dsh_delegate` | 通过 DeepSeek Harness 执行编码任务 |
 | Codex | `codex_delegate` | 通过 Codex 原生 app-server 执行编码任务 |
 | Claude Code | `claude_delegate` | 通过 Claude Code headless CLI 执行编码任务 |
+| AGY | `agy_delegate` | 通过 Antigravity CLI ACP 执行支持可选 model/effort/mode/agent 的编码任务 |
 
 ## 快速开始
 
@@ -69,7 +70,7 @@ node /ABSOLUTE/PATH/agent-relay/dist/cli.js
 }
 ```
 
-Cursor 需要显式配置可执行文件路径。Grok、OpenCode、DSH、Codex 和 Claude Code 默认使用 PATH 中的 `grok`、`opencode`、`dsh`、`codex` 和 `claude`。只需安装并认证实际要调用的 Agent。Claude Code 现在直接使用原生 CLI，不再需要单独的 ACP 桥接程序。
+Cursor 需要显式配置可执行文件路径。Grok、OpenCode、DSH、Codex、Claude Code 和 AGY 默认使用 PATH 中的 `grok`、`opencode`、`dsh`、`codex`、`claude` 和 `agy`。只需安装并认证实际要调用的 Agent。Claude Code 现在直接使用原生 CLI，不再需要单独的 ACP 桥接程序。
 
 relay 使用 stdio，stdout 专用于 MCP 消息。任务默认总超时为一小时；如果客户端支持设置工具调用超时，建议至少设为 3660 秒，并始终高于自定义的 relay 总超时。客户端超时和进度设置方式以各客户端为准。
 
@@ -141,6 +142,8 @@ pnpm setup:instructions --help
 将 /path/to/worktree 中的这个实现任务交给 Codex。
 
 将 /path/to/worktree 中的这个实现任务交给 Claude Code。
+
+将 /path/to/worktree 中的这个实现任务交给 AGY。
 ```
 
 每个工具都需要 `task` 和绝对路径 `cwd`。将返回的 `sessionId` 连同相同工作目录传给同一个工具，即可继续对应 Agent 的会话。各 provider 的可选参数可通过 MCP 工具发现获取。
@@ -150,7 +153,7 @@ pnpm setup:instructions --help
         ↓
 agent-relay 执行一轮 Agent 任务
         ↓
-Grok / Cursor / OpenCode / DSH / Codex / Claude Code 在本地工作
+Grok / Cursor / OpenCode / DSH / Codex / Claude Code / AGY 在本地工作
         ↓
 调用方审查结果、diff 和测试
         ↓
@@ -269,6 +272,18 @@ Windows 下，受支持的 npm/pnpm `.cmd` 启动脚本会解析为通过包信�
 
 真实 smoke 需显式运行 `pnpm test:real:claude`，或 `RUN_CLAUDE_REAL_TESTS=1 pnpm exec vitest run test/claude-real-smoke.test.ts`。可选 `CLAUDE_TEST_MODEL` 和 `CLAUDE_TEST_EFFORT` 验证显式 CLI 参数。测试在临时工作目录中编辑文件、跨进程恢复会话，并检查锁释放；需要认证且可能消耗模型额度。默认测试回放已提交的转录。
 
+### AGY
+
+安装并认证 Antigravity CLI（`agy`）。封闭测试的兼容基线为 `agy 1.5.12`。
+
+relay 通过 stdio NDJSON 启动 `agy acp --sandbox [--agent AGENT]`，沿用 CLI 已有认证（`agy` 或 `agy acp --login`），委派期间不发起交互式 OAuth。缺少凭据时返回 `AUTH_UNAVAILABLE`。可通过 `AGENT_RELAY_AGY_COMMAND` 指定其他可执行文件。
+
+输入包括 `task`、绝对路径 `cwd`，以及可选的 `sessionId`、`model`、`effort`、`mode`（`accept-edits`、`auto` 或 `plan`）和 `agent`。已有会话使用 `sessions/agy` 命名空间和原 `cwd` 通过 ACP `session/resume` 恢复，不回退到 `session/load`，也不会创建替代会话。
+
+新建和恢复的每一轮均按顺序配置会话声明的选项：`model`、然后 `thought_level`（来自 `effort`）、最后 `mode`（默认为 `auto`）。由于 `agy acp` 跨进程恢复后会将模式重置为 `default`，relay 在每轮都会显式设置 `mode` 并对照最终响应校验所有请求项。当前活跃会话在 prompt 期间发起的 ACP 权限请求一律拒绝（有 `reject_once` 时选择拒绝，否则取消）并返回 `PERMISSION_REQUIRED`，同时保留部分输出；取消后的延迟请求保持 `CANCELLED`，其他会话的权限请求仅取消而不中止当前轮次。结果包含 `provider: "agy"` 以及有界 `toolCalls` 和 `usage` 摘要。
+
+真实 smoke 需显式运行 `pnpm test:real:agy`（或 `RUN_AGY_REAL_TESTS=1 pnpm exec vitest run test/agy-real-smoke.test.ts`）。
+
 ### 原生权限策略
 
 relay 使用各 provider 的原生权限控制，各 provider 的能力不同。额外 ACP/native 审批请求均拒绝；Grok 的意外权限请求直接失败，不会打开交互审批流程。
@@ -281,6 +296,7 @@ relay 使用各 provider 的原生权限控制，各 provider 的能力不同。
 | OpenCode | 强制 V1 `OPENCODE_PERMISSION` 中的 `question`、`external_directory`、`webfetch`、`websearch` 为 `deny`；两个版本均拒绝额外 ACP 审批 | 不转换为 V2 权限规则，V2 自身配置仍生效；没有 OS 沙箱，shell、插件和外部 MCP 工具仍可能越界写入或联网；V1 外部目录拒绝也限制受支持工具的外部读取 |
 | DSH | headless `--patch` 在新建和恢复轮次中强制 `workspace-write`、`--approval-policy never`，关闭 `web_search`/`web_fetch`，并恢复凭据存储服务 | 文件沙箱不限制 shell 网络；shell 内部拒绝只能通过 DSH 结果文本标记识别；Windows ACL 和较旧 Linux Landlock 后端可能仅提供部分文件隔离 |
 | Claude Code | 新建和恢复轮次均使用 `acceptEdits` 与 `--permission-prompts none`；被拒工具在轮次结束后报告 | 不构成文件系统或网络隔离；模型可能在拒绝后继续执行。原生允许规则、hooks、shell 网络与外部 MCP 服务仍生效 |
+| AGY | `agy acp --sandbox` 配合 ACP `mode`（默认 `auto`，恢复时重新设置）；当前活跃会话 prompt 期间的 ACP 权限请求一律拒绝并返回 `PERMISSION_REQUIRED` | 本地 AGY 设置、hooks、skills、plugins 与外部 MCP 服务仍生效；沙箱隔离能力取决于宿主机平台 |
 
 **OpenCode 行为变化：** 不再通过 `allow_once` 自动授予权限。有 `reject_once` 就选择拒绝，否则取消，并返回带可用部分结果的 `PERMISSION_REQUIRED`。
 
@@ -288,7 +304,7 @@ Cursor 使用 relay 状态目录下的私有 CLI 配置快照。原有 CLI 设�
 
 DSH 接收包含 relay 随包权限 patch 和可选模型 patch 的私有文件，它们紧跟 `--profile headless`，位于应用参数之前。不修改用户 profile；`DSH_PERMISSION_MODE` 仅在子进程环境中设置。原生配置文件在确认进程清理后删除，包括启动失败、取消和超时；无法确认清理时保留文件。配置准备失败会返回结构化错误，不会无约束重试。进程崩溃可能遗留私有目录，只有确认没有工作进程使用时才能删除。
 
-Cursor、OpenCode 和 DSH 每次执行向 stderr 输出一次有长度限制的策略诊断。诊断不包含凭据或任务文本。上述设置不隔离外部 MCP 服务。自定义可执行文件/包装器必须遵守原生参数与配置；替换可执行文件不代表限制已经生效。
+Cursor、OpenCode、DSH 和 AGY 每次执行向 stderr 输出一次有长度限制的策略诊断。诊断不包含凭据或任务文本。上述设置不隔离外部 MCP 服务。自定义可执行文件/包装器必须遵守原生参数与配置；替换可执行文件不代表限制已经生效。
 
 策略通过各 provider 自身支持的后端面向 macOS、Linux 和 Windows；relay 能启动 CLI 不代表该平台具备可用沙箱。隔离测试验证配置和拒绝行为，不证明真实 CLI 隔离能力。Windows 下，Grok、DSH 和 Claude Code 的 headless CLI 在轮次结束时自行退出。由于根进程退出后无法再找到它的后代进程，relay 把 CLI 自行退出视为清理完成；比 CLI 存活更久的后台进程不会被停止。取消和超时在 Windows 上跳过优雅信号，在 CLI 仍运行时用 `taskkill /T /F` 结束整棵进程树。真实 CLI 验收仍需显式启用：在临时工作区检查内部/外部写入、shell 联网、Web 工具与恢复会话，记录 OS、CLI 版本及实际结果。未执行的平台与能力均标记为未验证。
 
@@ -304,6 +320,7 @@ Cursor、OpenCode 和 DSH 每次执行向 stderr 输出一次有长度限制的�
 | `AGENT_RELAY_DSH_COMMAND` | `dsh` | DSH 可执行文件 |
 | `AGENT_RELAY_CODEX_COMMAND` | `codex` | Codex 原生可执行文件 |
 | `AGENT_RELAY_CLAUDE_COMMAND` | `claude` | Claude Code CLI 可执行文件 |
+| `AGENT_RELAY_AGY_COMMAND` | `agy` | Antigravity CLI 可执行文件 |
 | `AGENT_RELAY_STATE_DIR` | `~/.local/agent-relay` | 会话元数据及工作目录锁 |
 | `AGENT_RELAY_PHASE_TIMEOUT_MS` | `30000` | 协议阶段超时 |
 | `AGENT_RELAY_TOTAL_TIMEOUT_MS` | `3600000` | 任务总超时 |

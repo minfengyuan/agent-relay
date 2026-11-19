@@ -388,7 +388,7 @@ export class AcpRunner<I extends DelegateInput, R extends RelayResult> {
         } catch (error) {
           const reason = totalAbort.signal.aborted && totalAbort.signal.reason instanceof RelayFailure
             ? totalAbort.signal.reason
-            : error;
+            : permissionFailure ?? error;
           operationFailure ??= reason;
           cancelBeforeCleanup ||= reason instanceof RelayFailure && (
             reason.code === "CANCELLED"
@@ -419,7 +419,7 @@ export class AcpRunner<I extends DelegateInput, R extends RelayResult> {
       const effectiveError = operationFailure
         ?? (totalAbort.signal.aborted && totalAbort.signal.reason instanceof RelayFailure
           ? totalAbort.signal.reason
-          : error);
+          : permissionFailure ?? error);
       const failure = effectiveError instanceof RelayFailure
         ? effectiveError
         : this.adapter.mapError?.(effectiveError) ?? new RelayFailure(
